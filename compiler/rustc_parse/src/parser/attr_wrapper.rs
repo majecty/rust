@@ -11,6 +11,7 @@ use rustc_errors::PResult;
 use rustc_session::parse::ParseSess;
 use rustc_span::{DUMMY_SP, sym};
 use thin_vec::ThinVec;
+use tracing::debug;
 
 use super::{Capturing, ForceCollect, Parser, Trailing};
 
@@ -101,6 +102,7 @@ impl<'a> Parser<'a> {
     }
 
     /// Parses code with `f`. If appropriate, it records the tokens (in
+
     /// `LazyAttrTokenStream` form) that were parsed in the result, accessible
     /// via the `HasTokens` trait.
     ///
@@ -160,6 +162,10 @@ impl<'a> Parser<'a> {
         force_collect: ForceCollect,
         f: impl FnOnce(&mut Self, AttrVec) -> PResult<'a, (R, Trailing, UsePreAttrPos)>,
     ) -> PResult<'a, R> {
+        debug!(
+            "collect_tokens: {:?}..{:?} (force_collect={:?})",
+            self.num_bump_calls, self.num_bump_calls, force_collect
+        );
         let possible_capture_mode = self.capture_cfg;
 
         // We must collect if anything could observe the collected tokens, i.e.
@@ -176,6 +182,10 @@ impl<'a> Parser<'a> {
             //   the parsed node has `#[cfg]` or `#[cfg_attr]` attributes).
             || possible_capture_mode;
         if !needs_collection {
+            debug!(
+                "collect_tokens: {:?}..{:?} (no collection needed)",
+                self.num_bump_calls, self.num_bump_calls
+            );
             return Ok(f(self, attrs.attrs)?.0);
         }
 
@@ -190,10 +200,29 @@ impl<'a> Parser<'a> {
         // distinction is used below and in `Parser::parse_inner_attributes`.
         let (mut ret, capture_trailing, use_pre_attr_pos) = {
             let prev_capturing = mem::replace(&mut self.capture_state.capturing, Capturing::Yes);
+            debug!(
+                "collect_tokens: {:?}..{:?} (capturing)",
+                collect_pos.start_pos, self.num_bump_calls
+            );
             let res = f(self, attrs.attrs);
+            debug!(
+                "collect_tokens: {:?}..{:?} (done capturing)",
+                collect_pos.start_pos, self.num_bump_calls
+            );
             self.capture_state.capturing = prev_capturing;
+            // print result is error or not
+            debug!(
+                "collect_tokens: {:?}..{:?} (res.is_ok()={:?})",
+                collect_pos.start_pos,
+                self.num_bump_calls,
+                res.is_ok()
+            );
             res?
         };
+        debug!(
+            "collect_tokens: {:?}..{:?} (done parsing)",
+            collect_pos.start_pos, self.num_bump_calls
+        );
 
         // - `None`: Our target doesn't support tokens at all (e.g. `NtIdent`).
         // - `Some(None)`: Our target supports tokens and has none.
@@ -212,6 +241,10 @@ impl<'a> Parser<'a> {
                 seen_indices.insert(i);
             }
         }
+        debug!(
+            "collect_tokens: {:?}..{:?} (seen_indices={:?})",
+            collect_pos.start_pos, self.num_bump_calls, seen_indices
+        );
         let ret_attrs: Cow<'_, [Attribute]> =
             if seen_indices.is_empty() {
                 Cow::Borrowed(ret.attrs())
@@ -233,12 +266,22 @@ impl<'a> Parser<'a> {
         // Note that this check is independent of `force_collect`. There's no
         // need to collect tokens when we don't support tokens or already have
         // tokens.
+        debug!(
+            "collect_tokens: {:?}..{:?} (ret_can_hold_tokens={:?})",
+            collect_pos.start_pos, self.num_bump_calls, ret_can_hold_tokens
+        );
+
         let definite_capture_mode = self.capture_cfg
             && matches!(self.capture_state.capturing, Capturing::Yes)
             && has_cfg_or_cfg_attr(&ret_attrs);
         if !definite_capture_mode && !ret_can_hold_tokens {
             return Ok(ret);
         }
+
+        debug!(
+            "collect_tokens: {:?}..{:?} (definite_capture_mode={:?})",
+            collect_pos.start_pos, self.num_bump_calls, definite_capture_mode
+        );
 
         // This is similar to the `needs_collection` check at the start of this
         // function, but now that we've parsed an AST node we have complete
@@ -396,6 +439,11 @@ impl<'a> Parser<'a> {
             self.capture_state.seen_attrs.clear();
         }
 
+        debug!(
+            "collect_tokens: {:?}..{:?} (end_pos={:?}, break_last_token={:?})",
+            collect_pos.start_pos, self.num_bump_calls, end_pos, self.break_last_token
+        );
+
         // If we support tokens and don't already have them, store the newly captured tokens.
         if let Some(target_tokens @ None) = ret.tokens_mut() {
             tokens_used = true;
@@ -403,6 +451,7 @@ impl<'a> Parser<'a> {
         }
 
         assert!(tokens_used); // check we didn't create `tokens` unnecessarily
+        debug!("collect_tokens: {:?}..{:?}", collect_pos.start_pos, end_pos);
         Ok(ret)
     }
 }

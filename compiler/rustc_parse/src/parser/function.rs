@@ -120,10 +120,14 @@ impl<'a> Parser<'a> {
         vis: &Visibility,
         case: Case,
     ) -> PResult<'a, (Ident, FnSig, Generics, Option<Box<FnContract>>, Option<Box<Block>>)> {
+        debug!("parse_fn start sig_lo:{:?} vis:{:?} case:{:?}", sig_lo, vis, case);
         let fn_span = self.token.span;
         let header = self.parse_fn_front_matter(vis, case, FrontMatterParsingMode::Function)?; // `const ... fn`
+        debug!("parse_fn header:{:?}", header);
         let ident = self.parse_ident()?; // `foo`
+        debug!("parse_fn ident:{:?}", ident);
         let mut generics = self.parse_generics()?; // `<'a, T, ...>`
+        debug!("parse_fn generics:{:?}", generics);
         let decl = match self.parse_fn_decl(&fn_parse_mode, AllowPlus::Yes, RecoverReturnSign::Yes)
         {
             Ok(decl) => decl,
@@ -137,20 +141,24 @@ impl<'a> Parser<'a> {
                 }
             }
         };
-
+        debug!("parse_fn decl:{:?}", decl);
         // Store the end of function parameters to give better diagnostics
         // inside `parse_fn_body()`.
         let fn_params_end = self.prev_token.span.shrink_to_hi();
+        debug!("parse_fn fn_params_end:{:?}", fn_params_end);
 
         let contract = self.parse_contract()?;
+        debug!("parse_fn contract:{:?}", contract);
 
         generics.where_clause = self.parse_where_clause()?; // `where T: Ord`
+        debug!("parse_fn where_clause:{:?}", generics.where_clause);
 
         // `fn_params_end` is needed only when it's followed by a where clause.
         let fn_params_end =
             if generics.where_clause.has_where_token { Some(fn_params_end) } else { None };
 
         let mut sig_hi = self.prev_token.span;
+        debug!("parse_fn sig_hi:{:?} fn_params_end:{:?}", sig_hi, fn_params_end);
         // Either `;` or `{ ... }`.
         let body =
             self.parse_fn_body(attrs, &ident, &mut sig_hi, fn_parse_mode.req_body, fn_params_end)?;
@@ -165,6 +173,7 @@ impl<'a> Parser<'a> {
         req_body: bool,
         fn_params_end: Option<Span>,
     ) -> PResult<'a, ErrorGuaranteed> {
+        debug!("error_fn_body_not_found req_body:{}", req_body);
         let expected: &[_] =
             if req_body { &[exp!(OpenBrace)] } else { &[exp!(Semi), exp!(OpenBrace)] };
         match self.expected_one_of_not_found(&[], expected) {
@@ -247,6 +256,7 @@ impl<'a> Parser<'a> {
         req_body: bool,
         fn_params_end: Option<Span>,
     ) -> PResult<'a, Option<Box<Block>>> {
+        debug!("parse_fn_body req_body:{}", req_body);
         let has_semi = if req_body {
             self.token == TokenKind::Semi
         } else {
@@ -728,9 +738,14 @@ impl<'a> Parser<'a> {
         first_param: bool,
         recover_arg_parse: bool,
     ) -> PResult<'a, Param> {
+        debug!("parse_param_general juhyung2");
         let lo = self.token.span;
         let attrs = self.parse_outer_attributes()?;
+        debug!("attr: {:?}", attrs);
+
         self.collect_tokens(None, attrs, ForceCollect::No, |this, attrs| {
+          debug!("inside collect_tokens callback");
+
             // Possibly parse `self`. Recover if we parsed it and it wasn't allowed here.
             if let Some(mut param) = this.parse_self_param()? {
                 param.attrs = attrs;
@@ -760,7 +775,11 @@ impl<'a> Parser<'a> {
             };
             let (pat, ty) = if is_name_required || this.is_named_param() {
                 debug!("parse_param_general parse_pat (is_name_required:{})", is_name_required);
+
+                debug!("parse_param_general juhyung");
+
                 let (pat, colon) = this.parse_fn_param_pat_colon()?;
+                debug!("parse_param_general parse_pat (is_name_required:{}) pat:{:?} colon:{}", is_name_required, pat, colon);
                 if !colon {
                     let mut err = this.unexpected().unwrap_err();
                     let pat_span = pat.span;
@@ -774,13 +793,16 @@ impl<'a> Parser<'a> {
                         let guar = err.emit();
                         let mut arg = dummy_arg(ident, guar);
                         arg.span = pat_span;
+                        debug!("parse_param_general ident_to_pat (is_name_required:{}) pat:{:?} colon:{}", is_name_required, arg.pat, colon);
                         Ok((arg, Trailing::No, UsePreAttrPos::No))
                     } else {
                         Err(err)
                     };
                 }
+                debug!("parse_param_general eat_incorrect_doc_comment_for_param_type");
 
                 this.eat_incorrect_doc_comment_for_param_type();
+                debug!("parse_param_general parse_ty_for_param");
                 (pat, this.parse_ty_for_param()?)
             } else {
                 debug!("parse_param_general ident_to_pat");
@@ -826,7 +848,9 @@ impl<'a> Parser<'a> {
                 }
             };
 
+            debug!("parse_param_general 2 pat:{:?} ty:{:?}", pat, ty);
             let span = lo.to(this.prev_token.span);
+            debug!("parse_param_general 3 pat:{:?} ty:{:?} span:{:?}", pat, ty, span);
 
             Ok((
                 Param { attrs, id: ast::DUMMY_NODE_ID, is_placeholder: false, pat, span, ty },

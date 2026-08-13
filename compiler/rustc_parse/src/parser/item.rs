@@ -2417,6 +2417,7 @@ impl<'a> Parser<'a> {
     /// Parses a field identifier. Specialized version of `parse_ident_common`
     /// for better diagnostics and suggestions.
     fn parse_field_ident(&mut self, adt_ty: &str, lo: Span) -> PResult<'a, Ident> {
+        debug!("parse_field_ident: adt_ty={adt_ty:?}, lo={lo:?}, token={:?}", self.token);
         let (ident, is_raw) = self.ident_or_err(true)?;
         if is_raw == IdentIsRaw::No
             && ident.is_reserved()

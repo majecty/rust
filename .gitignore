@@ -103,4 +103,8 @@ test-dashboard/
 flake.lock
 /default.nix
 
+# Compiled experiment binaries (not build artifacts)
+/trait
+jhsample/trait
+
 # Before adding new lines, see the comment at the top.

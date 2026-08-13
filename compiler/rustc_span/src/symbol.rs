@@ -55,6 +55,8 @@ symbols! {
         For:                "for",
         If:                 "if",
         Impl:               "impl",
+
+
         In:                 "in",
         Let:                "let",
         Loop:               "loop",
@@ -123,6 +125,7 @@ symbols! {
         // Weak keywords, have special meaning only in specific contexts.
         // Matching predicates: `is_weak`
         // tidy-alphabetical-start
+        Some: "some",
         Auto:               "auto",
         Builtin:            "builtin",
         Catch:              "catch",

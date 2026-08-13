@@ -10,6 +10,7 @@ use rustc_data_structures::stack::ensure_sufficient_stack;
 use rustc_errors::{Applicability, Diag, E0516, PResult};
 use rustc_span::{ErrorGuaranteed, Ident, Span, kw, sym};
 use thin_vec::{ThinVec, thin_vec};
+use tracing::debug;
 
 use super::{Parser, PathStyle, SeqSep, TokenType, Trailing};
 use crate::diagnostics::{
@@ -238,6 +239,7 @@ impl<'a> Parser<'a> {
         recover_qpath: RecoverQPath,
         recover_return_sign: RecoverReturnSign,
     ) -> PResult<'a, FnRetTy> {
+        debug!("parse_ret_ty");
         let lo = self.prev_token.span;
         Ok(if self.eat(exp!(RArrow)) {
             // FIXME(Centril): Can we unconditionally `allow_plus`?
@@ -281,6 +283,7 @@ impl<'a> Parser<'a> {
         ty_generics: Option<&Generics>,
         recover_question_mark: RecoverQuestionMark,
     ) -> PResult<'a, Box<Ty>> {
+        debug!("parse_ty_common");
         let allow_qpath_recovery = recover_qpath == RecoverQPath::Yes;
         maybe_recover_from_interpolated_ty_qpath!(self, allow_qpath_recovery);
         if self.token == token::Pound && self.look_ahead(1, |t| *t == token::OpenBracket) {
@@ -351,12 +354,19 @@ impl<'a> Parser<'a> {
             } else {
                 // Try to recover `for<'a> dyn Trait` or `for<'a> impl Trait`.
                 if self.may_recover()
-                    && (self.eat_keyword_noexpect(kw::Impl) || self.eat_keyword_noexpect(kw::Dyn))
+                    && (self.eat_keyword_noexpect(kw::Impl)
+                        || self.eat_keyword_noexpect(kw::Dyn)
+                        || self.eat_keyword_noexpect(kw::Some))
                 {
+                    debug!(
+                        "parse_ty_common: parse_remaining_bounds_path kw: {:?}",
+                        self.prev_token.ident()
+                    );
                     let kw = self.prev_token.ident().unwrap().0;
                     let removal_span = kw.span.with_hi(self.token.span.lo());
                     let path = self.parse_path(PathStyle::Type)?;
                     let parse_plus = allow_plus == AllowPlus::Yes && self.check_plus();
+                    debug!("parse_ty_common: parse_remaining_bounds_path");
                     let kind = self.parse_remaining_bounds_path(
                         bound_vars,
                         path,
@@ -380,6 +390,7 @@ impl<'a> Parser<'a> {
                         (TyKind::TraitObject(bounds, _), kw::Dyn) => {
                             TyKind::TraitObject(bounds, TraitObjectSyntax::Dyn)
                         }
+                        // juhyung impl trait
                         (TyKind::TraitObject(bounds, _), kw::Impl) => {
                             TyKind::ImplTrait(ast::DUMMY_NODE_ID, bounds)
                         }
@@ -399,7 +410,19 @@ impl<'a> Parser<'a> {
                     )?
                 }
             }
+        } else if self.eat_keyword(exp!(Some)) {
+            self.parse_impl_ty(&mut impl_dyn_multi)?
         } else if self.eat_keyword(exp!(Impl)) {
+            // } else if self.eat_keyword(crate::parser::token_type::ExpTokenPair {
+            //     tok: rustc_ast::token::Impl,
+            //     token_type: $crate::parser::token_type::TokenType::Impl
+            // }) {
+
+            // $crate::parser::token_type::ExpTokenPair {
+            //     tok: rustc_ast::token::$tok,
+            //     token_type: $crate::parser::token_type::TokenType::$tok
+            // }
+
             self.parse_impl_ty(&mut impl_dyn_multi)?
         } else if self.is_explicit_dyn_type() {
             self.parse_dyn_ty(&mut impl_dyn_multi)?
@@ -941,6 +964,7 @@ impl<'a> Parser<'a> {
 
     /// Parses an `impl B0 + ... + Bn` type.
     fn parse_impl_ty(&mut self, impl_dyn_multi: &mut bool) -> PResult<'a, TyKind> {
+        debug!("parse_impl_ty");
         if self.token.is_lifetime() {
             self.look_ahead(1, |t| {
                 if let token::Ident(sym, _) = t.kind {
