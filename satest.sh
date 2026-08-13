@@ -24,8 +24,9 @@ DO_BUILD=0
 STAGES=()
 
 usage() {
-    echo "usage: $0 [--build] [--log[=LEVEL]] [lex|parse|hir|mir|full] ..." >&2
+    echo "usage: $0 [--build] [--sample=some|any] [--log[=LEVEL]] [lex|parse|hir|mir|full] ..." >&2
     echo "  --build          run ./x.py build --stage 1 --keep-stage-std 1 first" >&2
+    echo "  --sample=NAME    test sample source (default: some -> someany/test.rs)" >&2
     echo "  --log[=LEVEL]    show compiler output and set RUSTC_LOG (default: info)" >&2
 }
 
@@ -34,6 +35,7 @@ for arg in "$@"; do
         -b|--build) DO_BUILD=1 ;;
         -l|--log) LOG_LEVEL="${LOG_LEVEL:-info}" ;;
         --log=*) LOG_LEVEL="${arg#--log=}" ;;
+        --sample=*) SRC="${arg#--sample=}" ;;
         -h|--help) usage; exit 0 ;;
         -*) echo "unknown option: $arg" >&2; usage; exit 2 ;;
         *) STAGES+=("$arg") ;;

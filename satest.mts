@@ -12,12 +12,14 @@
 //   4. mir   : --emit mir                 (analysis + build MIR, dump, no codegen)
 //   5. full  : (default)                  (codegen + link)
 //
-// usage: satest.mts [--build] [--log[=LEVEL]] [lex|parse|hir|mir|full] ...
+// usage: satest.mts [--build] [--sample=some|any] [--log[=LEVEL]] [lex|parse|hir|mir|full] ...
 // Run directly: node satest.mts ...   (Node >= 23.6)
 // Quick ref:  node satest.mts                 # all stages
 //             node satest.mts --log hir       # stage w/ output + logs
 //             node satest.mts --build lex parse # rebuild stage1 then 2 stages
 //             node satest.mts full --run      # build + run the binary
+//             node satest.mts --sample=any full --run  # any_test.rs
+//             node satest.mts --sample=any full --run  # any_test.rs
 
 import { spawnSync } from "node:child_process";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
@@ -41,7 +43,11 @@ const STAGES: Record<StageName, Stage> = {
   full:  { desc: "codegen and link",         flags: [],                              out: "test" },
 };
 
-const SRC = "./someany/test.rs";
+const SAMPLES: Record<string, string> = {
+  some: "./someany/test.rs",
+  any: "./someany/any_test.rs",
+};
+
 const RUSTC = ["rustup", "run", "stage1", "rustc"];
 const BUILD_CMD = ["build", "--stage", "1", "--keep-stage-std", "1"];
 const ALL_STAGES = Object.keys(STAGES) as StageName[];
@@ -49,11 +55,13 @@ const ALL_STAGES = Object.keys(STAGES) as StageName[];
 let build = false;
 let run = false;
 let logLevel = "";
+let sample = "some";
 const requested: StageName[] = [];
 
 function usage(): void {
-  console.error(`usage: $0 [--build] [--log[=LEVEL]] [lex|parse|hir|mir|full] ...`);
+  console.error(`usage: $0 [--build] [--sample=some|any] [--log[=LEVEL]] [lex|parse|hir|mir|full] ...`);
   console.error(`  --build          run ./x.py build --stage 1 --keep-stage-std 1 first`);
+  console.error(`  --sample=NAME    test sample source (default: some -> someany/test.rs)`);
   console.error(`  --run            run the compiled binary after the full stage`);
   console.error(`  --log[=LEVEL]    show compiler output and set RUSTC_LOG (default: info)`);
 }
@@ -68,6 +76,8 @@ for (let i = 2; i < process.argv.length; i++) {
     logLevel ||= "info";
   } else if (arg.startsWith("--log=")) {
     logLevel = arg.slice("--log=".length);
+  } else if (arg.startsWith("--sample=")) {
+    sample = arg.slice("--sample=".length);
   } else if (arg === "-h" || arg === "--help") {
     usage();
     process.exit(0);
@@ -78,6 +88,11 @@ for (let i = 2; i < process.argv.length; i++) {
   } else {
     requested.push(arg as StageName);
   }
+}
+
+if (!(sample in SAMPLES)) {
+  console.error(`unknown sample: ${sample} (expected one of: ${Object.keys(SAMPLES).join(", ")})`);
+  process.exit(2);
 }
 
 const outDir = join(process.cwd(), "build", "satest");
@@ -106,9 +121,10 @@ if (build) {
 }
 
 let failed: StageName | null = null;
+const src = SAMPLES[sample];
 for (const label of stages) {
   const { desc, flags, out } = STAGES[label];
-  const args = [SRC, ...flags, ...(out ? ["-o", join(outDir, out)] : [])];
+  const args = [src, ...flags, ...(out ? ["-o", join(outDir, out)] : [])];
   console.log(`== ${label.padEnd(6)}  ${desc}`);
 
   const { ok, output } = runRustc(args, label);
