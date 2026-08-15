@@ -687,6 +687,7 @@ impl<'a> Parser<'a> {
         &mut self,
         fn_parse_mode: &FnParseMode,
     ) -> PResult<'a, ThinVec<Param>> {
+debug!("parse_fn_params start");
         let mut first_param = true;
         // Parse the arguments, starting out with `self` being allowed...
         if self.token != TokenKind::OpenParen

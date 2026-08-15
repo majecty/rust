@@ -213,7 +213,7 @@ pub(crate) fn parse_check_cfg(dcx: DiagCtxtHandle<'_>, specs: Vec<String>) -> Ch
                     if boolean { rustc_span::kw::True } else { rustc_span::kw::False },
                     arg.span(),
                 ));
-            } else if arg.has_name(sym::any)
+            } else if arg.has_name(rustc_span::kw::Any)
                 && let Some(args) = arg.meta_item_list()
             {
                 if any_specified {
@@ -236,7 +236,7 @@ pub(crate) fn parse_check_cfg(dcx: DiagCtxtHandle<'_>, specs: Vec<String>) -> Ch
                 for arg in args {
                     if let Some(LitKind::Str(s, _)) = arg.lit().map(|lit| &lit.kind) {
                         values.insert(Some(*s));
-                    } else if arg.has_name(sym::any)
+                    } else if arg.has_name(rustc_span::kw::Any)
                         && let Some(args) = arg.meta_item_list()
                     {
                         if values_any_specified {

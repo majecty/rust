@@ -17,6 +17,7 @@ use crate::diagnostics::UnknownExternLangItem;
 use crate::session_diagnostics::{
     AttributeRequiresOpt, CguFieldsMissing, RustcScalableVectorCountOutOfRange, UnknownLangItem,
 };
+use rustc_span::kw;
 
 pub(crate) struct RustcMainParser;
 
@@ -255,11 +256,11 @@ fn parse_cgu_fields(
             sym::no => CguKind::No,
             sym::pre_dash_lto => CguKind::PreDashLto,
             sym::post_dash_lto => CguKind::PostDashLto,
-            sym::any => CguKind::Any,
+            kw::Any => CguKind::Any,
             _ => {
                 cx.adcx().expected_specific_argument_strings(
                     span,
-                    &[sym::no, sym::pre_dash_lto, sym::post_dash_lto, sym::any],
+                    &[sym::no, sym::pre_dash_lto, sym::post_dash_lto, kw::Any],
                 );
                 return None;
             }

@@ -573,7 +573,7 @@ fn parse_predicate(input: &MetaItemOrLitParser) -> Result<Predicate, InvalidOnCl
 
     match meta_item.args() {
         ArgParser::List(mis) => match predicate.name {
-            sym::any => Ok(Predicate::Any(parse_predicate_sequence(mis)?)),
+            kw::Any => Ok(Predicate::Any(parse_predicate_sequence(mis)?)),
             sym::all => Ok(Predicate::All(parse_predicate_sequence(mis)?)),
             sym::not => {
                 if let Some(single) = mis.as_single() {

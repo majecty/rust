@@ -14,7 +14,7 @@ use rustc_session::config::ExpectedValues;
 use rustc_session::diagnostics::feature_err;
 use rustc_session::lint::builtin::UNEXPECTED_CFGS;
 use rustc_session::parse::ParseSess;
-use rustc_span::{ErrorGuaranteed, Span, Symbol, sym};
+use rustc_span::{ErrorGuaranteed, Span, Symbol, sym, kw};
 use thin_vec::ThinVec;
 
 use crate::attributes::AttributeSafety;
@@ -91,7 +91,7 @@ pub fn parse_cfg_entry(
                     };
                     CfgEntry::Not(Box::new(parse_cfg_entry(cx, single)?), list.span)
                 }
-                Some(sym::any) => CfgEntry::Any(
+                Some(kw::Any) => CfgEntry::Any(
                     list.mixed().flat_map(|sub_item| parse_cfg_entry(cx, sub_item)).collect(),
                     list.span,
                 ),
@@ -102,7 +102,7 @@ pub fn parse_cfg_entry(
                 Some(sym::target) => parse_cfg_entry_target(cx, list, meta.span())?,
                 Some(sym::version) => parse_cfg_entry_version(cx, list, meta.span())?,
                 _ => {
-                    let mut possibilities = vec![sym::any, sym::all, sym::not, sym::target];
+                    let mut possibilities = vec![kw::Any, sym::all, sym::not, sym::target];
                     if cx.features_option().is_some_and(Features::cfg_version) {
                         possibilities.push(sym::version);
                     }

@@ -12,13 +12,13 @@
 //   4. mir   : --emit mir                 (analysis + build MIR, dump, no codegen)
 //   5. full  : (default)                  (codegen + link)
 //
-// usage: satest.mts [--build] [--sample=some|any] [--log[=LEVEL]] [lex|parse|hir|mir|full] ...
+// usage: satest.mts [--build] [--build-std] [--sample=some|any] [--log[=LEVEL]] [lex|parse|hir|mir|full] ...
 // Run directly: node satest.mts ...   (Node >= 23.6)
 // Quick ref:  node satest.mts                 # all stages
 //             node satest.mts --log hir       # stage w/ output + logs
 //             node satest.mts --build lex parse # rebuild stage1 then 2 stages
+//             node satest.mts --build-std full # rebuild stage1 + stdlib then compile
 //             node satest.mts full --run      # build + run the binary
-//             node satest.mts --sample=any full --run  # any_test.rs
 //             node satest.mts --sample=any full --run  # any_test.rs
 
 import { spawnSync } from "node:child_process";
@@ -49,18 +49,26 @@ const SAMPLES: Record<string, string> = {
 };
 
 const RUSTC = ["rustup", "run", "stage1", "rustc"];
+// `--keep-stage-std 1` reuses the previous stdlib build. If the stage1 compiler
+// changed since std was last built, the stale rmeta's pre-interned symbol
+// indices no longer match (see the `--build-std` note below) and names like
+// `Iterator`/`Vec` fail to resolve. `--build-std` drops this flag so the
+// stdlib is rebuilt with the current compiler.
 const BUILD_CMD = ["build", "--stage", "1", "--keep-stage-std", "1"];
+const BUILD_STD_CMD = ["build", "--stage", "1"];
 const ALL_STAGES = Object.keys(STAGES) as StageName[];
 
 let build = false;
+let buildStd = false;
 let run = false;
 let logLevel = "";
 let sample = "some";
 const requested: StageName[] = [];
 
 function usage(): void {
-  console.error(`usage: $0 [--build] [--sample=some|any] [--log[=LEVEL]] [lex|parse|hir|mir|full] ...`);
+  console.error(`usage: $0 [--build] [--build-std] [--sample=some|any] [--log[=LEVEL]] [lex|parse|hir|mir|full] ...`);
   console.error(`  --build          run ./x.py build --stage 1 --keep-stage-std 1 first`);
+  console.error(`  --build-std      run ./x.py build --stage 1 (rebuilds stdlib too) first`);
   console.error(`  --sample=NAME    test sample source (default: some -> someany/test.rs)`);
   console.error(`  --run            run the compiled binary after the full stage`);
   console.error(`  --log[=LEVEL]    show compiler output and set RUSTC_LOG (default: info)`);
@@ -70,6 +78,8 @@ for (let i = 2; i < process.argv.length; i++) {
   const arg = process.argv[i];
   if (arg === "-b" || arg === "--build") {
     build = true;
+  } else if (arg === "--build-std") {
+    buildStd = true;
   } else if (arg === "-r" || arg === "--run") {
     run = true;
   } else if (arg === "-l" || arg === "--log") {
@@ -109,9 +119,10 @@ function runRustc(args: string[], label: string): { ok: boolean; output: string 
   return { ok: status === 0, output };
 }
 
-if (build) {
-  console.log(`== build  ${BUILD_CMD.join(" ")}`);
-  const { status, stdout, stderr } = spawnSync("./x.py", BUILD_CMD, { encoding: "utf8" });
+if (build || buildStd) {
+  const cmd = buildStd ? BUILD_STD_CMD : BUILD_CMD;
+  console.log(`== build  ${cmd.join(" ")}`);
+  const { status, stdout, stderr } = spawnSync("./x.py", cmd, { encoding: "utf8" });
   const output = stdout + stderr;
   console.log(status === 0 ? "   OK" : "   FAILED");
   if (status !== 0) {

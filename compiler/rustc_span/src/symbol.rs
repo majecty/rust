@@ -126,6 +126,7 @@ symbols! {
         // Matching predicates: `is_weak`
         // tidy-alphabetical-start
         Some: "some",
+        Any: "any",
         Auto:               "auto",
         Builtin:            "builtin",
         Catch:              "catch",
@@ -410,7 +411,7 @@ symbols! {
         anon,
         anon_assoc,
         anonymous_lifetime_in_impl_trait,
-        any,
+        // any,
         apx_target_feature,
         arbitrary_enum_discriminant,
         arbitrary_self_types,

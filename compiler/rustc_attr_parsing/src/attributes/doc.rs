@@ -8,7 +8,7 @@ use rustc_hir::attrs::{
     DocInline, HideOrShow,
 };
 use rustc_session::diagnostics::feature_err;
-use rustc_span::{Span, Symbol, edition, sym};
+use rustc_span::{Span, Symbol, edition, sym, kw};
 
 use super::prelude::{ALL_TARGETS, AllowedTargets};
 use super::{AcceptMapping, AttributeParser, template};
@@ -352,11 +352,11 @@ impl DocParser {
                         cx.adcx().expected_identifier(sub_item.path().span());
                         continue;
                     };
-                    if [sym::any, sym::none].contains(&ident.name)
+                    if [kw::Any, sym::none].contains(&ident.name)
                         && let ArgParser::List(list) = sub_item.args()
                         && list.mixed().count() == 0
                     {
-                        if ident.name == sym::any {
+                        if ident.name == kw::Any {
                             if let DocCfgHideShow::List(values) = &cfg_values
                                 && let Some(value) = values.first()
                             {
