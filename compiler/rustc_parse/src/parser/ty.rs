@@ -411,7 +411,7 @@ impl<'a> Parser<'a> {
                 }
             }
         } else if self.eat_keyword(exp!(Some)) {
-            self.parse_impl_ty(&mut impl_dyn_multi)?
+            self.parse_impl_some(&mut impl_dyn_multi)?
         } else if self.eat_keyword(exp!(Any)) {
             self.parse_impl_ty(&mut impl_dyn_multi)?
         } else if self.eat_keyword(exp!(Impl)) {
@@ -964,9 +964,32 @@ impl<'a> Parser<'a> {
         Ok(())
     }
 
+
+    fn parse_impl_some(&mut self, impl_dyn_multi: &mut bool) -> PResult<'a, TyKind> {
+        if self.token.is_lifetime() {
+            self.look_ahead(1, |t| {
+                if let token::Ident(sym, _) = t.kind {
+                    // parse pattern with "'a Sized" we're supposed to give suggestion like
+                    // "'a + Sized"
+                    self.dcx().emit_err(diagnostics::MissingPlusBounds {
+                        span: self.token.span,
+                        hi: self.token.span.shrink_to_hi(),
+                        sym,
+                    });
+                }
+            })
+        }
+
+        // Always parse bounds greedily for better error recovery.
+        let bounds = self.parse_generic_bounds()?;
+
+        *impl_dyn_multi = bounds.len() > 1 || self.prev_token == TokenKind::Plus;
+
+        Ok(TyKind::ImplTrait(ast::DUMMY_NODE_ID, bounds))
+    }
+
     /// Parses an `impl B0 + ... + Bn` type.
     fn parse_impl_ty(&mut self, impl_dyn_multi: &mut bool) -> PResult<'a, TyKind> {
-        debug!("parse_impl_ty");
         if self.token.is_lifetime() {
             self.look_ahead(1, |t| {
                 if let token::Ident(sym, _) = t.kind {
