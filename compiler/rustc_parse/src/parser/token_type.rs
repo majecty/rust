@@ -97,6 +97,7 @@ pub enum TokenType {
     KwGen,
     KwIf,
     KwSome,
+    KwAny,
     KwImpl,
     KwIn,
     KwLet,
@@ -239,6 +240,7 @@ impl TokenType {
             KwGen,
             KwIf,
             KwSome,
+            KwAny,
             KwImpl,
             KwIn,
             KwLet,
@@ -318,6 +320,7 @@ impl TokenType {
             TokenType::KwIf => Some(kw::If),
             TokenType::KwSome => Some(kw::Some),
             TokenType::KwImpl => Some(kw::Impl),
+            TokenType::KwAny => Some(kw::Any),
             TokenType::KwIn => Some(kw::In),
             TokenType::KwLet => Some(kw::Let),
             TokenType::KwLoop => Some(kw::Loop),
@@ -534,6 +537,7 @@ macro_rules! exp {
     (Gen)            => { exp!(@kw, Gen,        KwGen) };
     (If)             => { exp!(@kw, If,         KwIf) };
     (Some)           => { exp!(@kw, Some,       KwSome) };
+    (Any)            => { exp!(@kw, Any,        KwAny) };
     (Impl)           => { exp!(@kw, Impl,       KwImpl) };
     (In)             => { exp!(@kw, In,         KwIn) };
     (Let)            => { exp!(@kw, Let,        KwLet) };

@@ -687,7 +687,6 @@ impl<'a> Parser<'a> {
         &mut self,
         fn_parse_mode: &FnParseMode,
     ) -> PResult<'a, ThinVec<Param>> {
-debug!("parse_fn_params start");
         let mut first_param = true;
         // Parse the arguments, starting out with `self` being allowed...
         if self.token != TokenKind::OpenParen
@@ -739,13 +738,10 @@ debug!("parse_fn_params start");
         first_param: bool,
         recover_arg_parse: bool,
     ) -> PResult<'a, Param> {
-        debug!("parse_param_general juhyung2");
         let lo = self.token.span;
         let attrs = self.parse_outer_attributes()?;
-        debug!("attr: {:?}", attrs);
 
         self.collect_tokens(None, attrs, ForceCollect::No, |this, attrs| {
-          debug!("inside collect_tokens callback");
 
             // Possibly parse `self`. Recover if we parsed it and it wasn't allowed here.
             if let Some(mut param) = this.parse_self_param()? {
@@ -775,12 +771,7 @@ debug!("parse_fn_params start");
                 is_name_required
             };
             let (pat, ty) = if is_name_required || this.is_named_param() {
-                debug!("parse_param_general parse_pat (is_name_required:{})", is_name_required);
-
-                debug!("parse_param_general juhyung");
-
                 let (pat, colon) = this.parse_fn_param_pat_colon()?;
-                debug!("parse_param_general parse_pat (is_name_required:{}) pat:{:?} colon:{}", is_name_required, pat, colon);
                 if !colon {
                     let mut err = this.unexpected().unwrap_err();
                     let pat_span = pat.span;
@@ -800,13 +791,10 @@ debug!("parse_fn_params start");
                         Err(err)
                     };
                 }
-                debug!("parse_param_general eat_incorrect_doc_comment_for_param_type");
 
                 this.eat_incorrect_doc_comment_for_param_type();
-                debug!("parse_param_general parse_ty_for_param");
                 (pat, this.parse_ty_for_param()?)
             } else {
-                debug!("parse_param_general ident_to_pat");
                 let parser_snapshot_before_ty = this.create_snapshot_for_diagnostic();
                 this.eat_incorrect_doc_comment_for_param_type();
                 let mut ty = this.parse_ty_for_param();
@@ -849,9 +837,7 @@ debug!("parse_fn_params start");
                 }
             };
 
-            debug!("parse_param_general 2 pat:{:?} ty:{:?}", pat, ty);
             let span = lo.to(this.prev_token.span);
-            debug!("parse_param_general 3 pat:{:?} ty:{:?} span:{:?}", pat, ty, span);
 
             Ok((
                 Param { attrs, id: ast::DUMMY_NODE_ID, is_placeholder: false, pat, span, ty },

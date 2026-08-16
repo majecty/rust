@@ -412,6 +412,8 @@ impl<'a> Parser<'a> {
             }
         } else if self.eat_keyword(exp!(Some)) {
             self.parse_impl_ty(&mut impl_dyn_multi)?
+        } else if self.eat_keyword(exp!(Any)) {
+            self.parse_impl_ty(&mut impl_dyn_multi)?
         } else if self.eat_keyword(exp!(Impl)) {
             // } else if self.eat_keyword(crate::parser::token_type::ExpTokenPair {
             //     tok: rustc_ast::token::Impl,
