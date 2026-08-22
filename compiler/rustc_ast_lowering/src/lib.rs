@@ -1692,11 +1692,11 @@ impl<'hir> LoweringContext<'_, 'hir> {
                         hir::TyKind::Err(guar)
                     }
                     ImplTraitContext::InBinding => {
-                        hir::TyKind::TraitAscription(self.lower_param_bounds(
-                            bounds,
-                            RelaxedBoundPolicy::Allowed(&mut Default::default()),
-                            itctx,
-                        ))
+                        let guar = self.dcx().emit_err(MisplacedSomeTrait {
+                            span: t.span,
+                            position: DiagArgFromDisplay(&"argument"),
+                        });
+                        hir::TyKind::Err(guar)
                     }
                     ImplTraitContext::FeatureGated(position, feature) => {
                         let guar = self
