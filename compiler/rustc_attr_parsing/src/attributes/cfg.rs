@@ -14,7 +14,7 @@ use rustc_session::config::ExpectedValues;
 use rustc_session::diagnostics::feature_err;
 use rustc_session::lint::builtin::UNEXPECTED_CFGS;
 use rustc_session::parse::ParseSess;
-use rustc_span::{ErrorGuaranteed, Span, Symbol, sym, kw};
+use rustc_span::{ErrorGuaranteed, Span, Symbol, kw, sym};
 use thin_vec::ThinVec;
 
 use crate::attributes::AttributeSafety;

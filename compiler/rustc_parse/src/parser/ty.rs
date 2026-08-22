@@ -964,7 +964,6 @@ impl<'a> Parser<'a> {
         Ok(())
     }
 
-
     fn parse_impl_some(&mut self, impl_dyn_multi: &mut bool) -> PResult<'a, TyKind> {
         if self.token.is_lifetime() {
             self.look_ahead(1, |t| {

@@ -8,7 +8,7 @@ use rustc_hir::attrs::{
     DivergingFallbackBehavior, RustcCleanAttribute, RustcCleanQueries, RustcMirKind,
 };
 use rustc_hir::target::GenericParamKind;
-use rustc_span::Symbol;
+use rustc_span::{Symbol, kw};
 
 use super::prelude::*;
 use super::util::parse_single_integer;
@@ -17,7 +17,6 @@ use crate::diagnostics::UnknownExternLangItem;
 use crate::session_diagnostics::{
     AttributeRequiresOpt, CguFieldsMissing, RustcScalableVectorCountOutOfRange, UnknownLangItem,
 };
-use rustc_span::kw;
 
 pub(crate) struct RustcMainParser;
 

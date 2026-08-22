@@ -684,6 +684,7 @@ impl<'v> ast_visit::Visitor<'v> for StatCollector<'v> {
                 Pat,
                 TraitObject,
                 ImplTrait,
+                ImplSome,
                 Paren,
                 Infer,
                 ImplicitSelf,

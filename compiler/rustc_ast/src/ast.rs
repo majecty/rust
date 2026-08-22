@@ -2543,6 +2543,7 @@ pub enum TyKind {
     /// generate `NodeId`s on the fly, which would complicate
     /// the generation of opaque `type Foo = impl Trait` items significantly.
     ImplTrait(NodeId, #[visitable(extra = BoundKind::Impl)] GenericBounds),
+    ImplSome(NodeId, #[visitable(extra = BoundKind::Impl)] GenericBounds),
     /// No-op; kept solely so that we can pretty-print faithfully.
     Paren(Box<Ty>),
     /// This means the type should be inferred instead of it having been

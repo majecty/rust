@@ -74,7 +74,9 @@ use smallvec::{SmallVec, smallvec};
 use thin_vec::ThinVec;
 use tracing::{debug, instrument, trace};
 
-use crate::diagnostics::{AssocTyParentheses, AssocTyParenthesesSub, MisplacedImplTrait};
+use crate::diagnostics::{
+    AssocTyParentheses, AssocTyParenthesesSub, MisplacedImplTrait, MisplacedSomeTrait,
+};
 
 macro_rules! arena_vec {
     ($this:expr; $($x:expr),*) => (
@@ -1675,6 +1677,49 @@ impl<'hir> LoweringContext<'_, 'hir> {
                     (bounds, lifetime_bound)
                 });
                 hir::TyKind::TraitObject(bounds, TaggedRef::new(lifetime_bound, *kind))
+            }
+            TyKind::ImplSome(def_node_id, bounds) => {
+                let span = t.span;
+                match itctx {
+                    ImplTraitContext::OpaqueTy { origin } => {
+                        self.lower_opaque_impl_trait(span, origin, *def_node_id, bounds, itctx)
+                    }
+                    ImplTraitContext::Universal => {
+                        let guar = self.dcx().emit_err(MisplacedSomeTrait {
+                            span: t.span,
+                            position: DiagArgFromDisplay(&"argument"),
+                        });
+                        hir::TyKind::Err(guar)
+                    }
+                    ImplTraitContext::InBinding => {
+                        hir::TyKind::TraitAscription(self.lower_param_bounds(
+                            bounds,
+                            RelaxedBoundPolicy::Allowed(&mut Default::default()),
+                            itctx,
+                        ))
+                    }
+                    ImplTraitContext::FeatureGated(position, feature) => {
+                        let guar = self
+                            .tcx
+                            .sess
+                            .create_feature_err(
+                                MisplacedImplTrait {
+                                    span: t.span,
+                                    position: DiagArgFromDisplay(&position),
+                                },
+                                feature,
+                            )
+                            .emit();
+                        hir::TyKind::Err(guar)
+                    }
+                    ImplTraitContext::Disallowed(position) => {
+                        let guar = self.dcx().emit_err(MisplacedImplTrait {
+                            span: t.span,
+                            position: DiagArgFromDisplay(&position),
+                        });
+                        hir::TyKind::Err(guar)
+                    }
+                }
             }
             TyKind::ImplTrait(def_node_id, bounds) => {
                 let span = t.span;

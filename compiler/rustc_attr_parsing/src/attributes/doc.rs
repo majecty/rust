@@ -8,7 +8,7 @@ use rustc_hir::attrs::{
     DocInline, HideOrShow,
 };
 use rustc_session::diagnostics::feature_err;
-use rustc_span::{Span, Symbol, edition, sym, kw};
+use rustc_span::{Span, Symbol, edition, kw, sym};
 
 use super::prelude::{ALL_TARGETS, AllowedTargets};
 use super::{AcceptMapping, AttributeParser, template};

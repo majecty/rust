@@ -1407,6 +1407,10 @@ impl<'a> State<'a> {
                 self.word_nbsp("impl");
                 self.print_type_bounds(bounds);
             }
+            ast::TyKind::ImplSome(_, bounds) => {
+                self.word_nbsp("some");
+                self.print_type_bounds(bounds);
+            }
             ast::TyKind::Array(ty, length) => {
                 self.word("[");
                 self.print_type(ty);

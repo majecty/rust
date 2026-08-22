@@ -91,6 +91,15 @@ pub(crate) struct MisplacedImplTrait<'a> {
 }
 
 #[derive(Diagnostic)]
+#[diag("`some Trait` is not allowed in {$position}", code = E0562)]
+#[note("`some Trait` is only allowed in arguments and return types of functions and methods")]
+pub(crate) struct MisplacedSomeTrait<'a> {
+    #[primary_span]
+    pub span: Span,
+    pub position: DiagArgFromDisplay<'a>,
+}
+
+#[derive(Diagnostic)]
 #[diag("associated type bounds are not allowed in `dyn` types")]
 pub(crate) struct MisplacedAssocTyBinding {
     #[primary_span]
