@@ -284,7 +284,7 @@ fn type_trailing_braced_mac_call(mut ty: &ast::Ty) -> Option<&ast::MacCall> {
 
             ast::TyKind::TraitObject(bounds, _)
             | ast::TyKind::ImplTrait(_, bounds)
-            | ast::TyKind::ImplSome(_, bounds) => match bounds.last() {
+            | ast::TyKind::SomeTrait(_, bounds) => match bounds.last() {
                 Some(ast::GenericBound::Trait(bound)) => {
                     match path_return_type(&bound.trait_ref.path) {
                         Some(trailing_ty) => ty = trailing_ty,

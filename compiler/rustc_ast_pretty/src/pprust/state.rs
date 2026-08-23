@@ -1407,7 +1407,7 @@ impl<'a> State<'a> {
                 self.word_nbsp("impl");
                 self.print_type_bounds(bounds);
             }
-            ast::TyKind::ImplSome(_, bounds) => {
+            ast::TyKind::SomeTrait(_, bounds) => {
                 self.word_nbsp("some");
                 self.print_type_bounds(bounds);
             }

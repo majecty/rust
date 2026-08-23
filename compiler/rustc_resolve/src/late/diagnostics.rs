@@ -4287,7 +4287,7 @@ impl<'ast, 'ra, 'tcx> LateResolutionVisitor<'_, 'ast, 'ra, 'tcx> {
                                     } else if let TyKind::ImplTrait(..) = &param.ty.kind {
                                         // We handle these in the next `else if` branch.
                                         None
-                                    } else if let TyKind::ImplSome(..) = &param.ty.kind {
+                                    } else if let TyKind::SomeTrait(..) = &param.ty.kind {
                                         // We handle these in the next `else if` branch.
                                         None
                                     } else {
@@ -4325,7 +4325,7 @@ impl<'ast, 'ra, 'tcx> LateResolutionVisitor<'_, 'ast, 'ra, 'tcx> {
                                 .iter()
                                 .filter_map(|param| match &param.ty.kind {
                                     TyKind::ImplTrait(_, bounds) => Some(bounds),
-                                    TyKind::ImplSome(_, bounds) => Some(bounds),
+                                    TyKind::SomeTrait(_, bounds) => Some(bounds),
                                     _ => None,
                                 })
                                 .flat_map(|bounds| bounds.into_iter())

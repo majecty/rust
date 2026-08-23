@@ -1872,7 +1872,7 @@ impl InvocationCollectorNode for ast::Ty {
             let name = Symbol::intern(&pprust::ty_to_string(self).replace('\n', " "));
             collector.cx.resolver.insert_impl_trait_name(self.id, name);
         }
-        if let ast::TyKind::ImplSome(..) = self.kind {
+        if let ast::TyKind::SomeTrait(..) = self.kind {
             let name = Symbol::intern(&pprust::ty_to_string(self).replace('\n', " "));
             collector.cx.resolver.insert_impl_trait_name(self.id, name);
         }

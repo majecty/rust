@@ -991,7 +991,7 @@ impl<'ast, 'ra, 'tcx> Visitor<'ast> for LateResolutionVisitor<'_, 'ast, 'ra, 'tc
                 self.with_lifetime_rib(LifetimeRibKind::ImplTrait, |this| visit::walk_ty(this, ty));
                 self.lifetime_elision_candidates = candidates;
             }
-            TyKind::ImplSome(..) => {
+            TyKind::SomeTrait(..) => {
                 let candidates = self.lifetime_elision_candidates.take();
                 self.with_lifetime_rib(LifetimeRibKind::ImplTrait, |this| visit::walk_ty(this, ty));
                 self.lifetime_elision_candidates = candidates;

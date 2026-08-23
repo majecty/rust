@@ -1678,7 +1678,7 @@ impl<'hir> LoweringContext<'_, 'hir> {
                 });
                 hir::TyKind::TraitObject(bounds, TaggedRef::new(lifetime_bound, *kind))
             }
-            TyKind::ImplSome(def_node_id, bounds) => {
+            TyKind::SomeTrait(def_node_id, bounds) => {
                 let span = t.span;
                 match itctx {
                     ImplTraitContext::OpaqueTy { origin } => {

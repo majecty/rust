@@ -449,7 +449,7 @@ impl<'a, 'ra, 'tcx> visit::Visitor<'a> for DefCollector<'a, 'ra, 'tcx> {
                 self.visit_macro_invoc(ty.id);
                 self.visit_invoc(ty.id);
             }
-            TyKind::ImplSome(opaque_id, _) => {
+            TyKind::SomeTrait(opaque_id, _) => {
                 let name = *self
                     .r
                     .impl_trait_names

@@ -395,7 +395,7 @@ impl<'a> Parser<'a> {
                             TyKind::ImplTrait(ast::DUMMY_NODE_ID, bounds)
                         }
                         (TyKind::TraitObject(bounds, _), kw::Some) => {
-                            TyKind::ImplSome(ast::DUMMY_NODE_ID, bounds)
+                            TyKind::SomeTrait(ast::DUMMY_NODE_ID, bounds)
                         }
                         _ => return Err(err),
                     };
@@ -987,7 +987,7 @@ impl<'a> Parser<'a> {
 
         *impl_dyn_multi = bounds.len() > 1 || self.prev_token == TokenKind::Plus;
 
-        Ok(TyKind::ImplSome(ast::DUMMY_NODE_ID, bounds))
+        Ok(TyKind::SomeTrait(ast::DUMMY_NODE_ID, bounds))
     }
 
     /// Parses an `impl B0 + ... + Bn` type.
