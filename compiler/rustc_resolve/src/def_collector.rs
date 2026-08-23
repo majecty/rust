@@ -449,6 +449,31 @@ impl<'a, 'ra, 'tcx> visit::Visitor<'a> for DefCollector<'a, 'ra, 'tcx> {
                 self.visit_macro_invoc(ty.id);
                 self.visit_invoc(ty.id);
             }
+            TyKind::ImplSome(opaque_id, _) => {
+                let name = *self
+                    .r
+                    .impl_trait_names
+                    .get(&ty.id)
+                    .unwrap_or_else(|| span_bug!(ty.span, "expected this opaque to be named"));
+
+                let kind = match self.invocation_parent.impl_trait_context {
+                    // not reachable
+                    ImplTraitContext::Universal => return visit::walk_ty(self, ty),
+                    ImplTraitContext::Existential => DefKind::OpaqueTy,
+                    // not reachable
+                    ImplTraitContext::InBinding => return visit::walk_ty(self, ty),
+                };
+                let id = self.create_def(opaque_id, Some(name), kind, ty.span).def_id();
+                match self.invocation_parent.impl_trait_context {
+                    // Do not nest APIT, as we desugar them as `impl_trait: bounds`,
+                    // so the `impl_trait` node is not a parent to `bounds`.
+                    ImplTraitContext::Universal => unreachable!(),
+                    ImplTraitContext::Existential => {
+                        self.with_parent(id, |this| visit::walk_ty(this, ty))
+                    }
+                    ImplTraitContext::InBinding => unreachable!(),
+                };
+            }
             TyKind::ImplTrait(opaque_id, _) => {
                 let name = *self
                     .r

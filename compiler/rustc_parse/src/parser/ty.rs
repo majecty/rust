@@ -394,6 +394,9 @@ impl<'a> Parser<'a> {
                         (TyKind::TraitObject(bounds, _), kw::Impl) => {
                             TyKind::ImplTrait(ast::DUMMY_NODE_ID, bounds)
                         }
+                        (TyKind::TraitObject(bounds, _), kw::Some) => {
+                            TyKind::ImplSome(ast::DUMMY_NODE_ID, bounds)
+                        }
                         _ => return Err(err),
                     };
                     err.emit();
@@ -984,7 +987,7 @@ impl<'a> Parser<'a> {
 
         *impl_dyn_multi = bounds.len() > 1 || self.prev_token == TokenKind::Plus;
 
-        Ok(TyKind::ImplTrait(ast::DUMMY_NODE_ID, bounds))
+        Ok(TyKind::ImplSome(ast::DUMMY_NODE_ID, bounds))
     }
 
     /// Parses an `impl B0 + ... + Bn` type.
@@ -1427,6 +1430,7 @@ impl<'a> Parser<'a> {
                             Applicability::MaybeIncorrect,
                         )
                     }
+                    // JUHYUNG impl trait 못들어오는 곳에 썼을 때 에러 처리라서 지금 작업 불필요.
                     TyKind::ImplTrait(_, bounds)
                         if let [GenericBound::Trait(tr, ..), ..] = bounds.as_slice() =>
                     {

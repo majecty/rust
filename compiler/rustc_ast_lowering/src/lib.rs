@@ -1694,26 +1694,30 @@ impl<'hir> LoweringContext<'_, 'hir> {
                     ImplTraitContext::InBinding => {
                         let guar = self.dcx().emit_err(MisplacedSomeTrait {
                             span: t.span,
-                            position: DiagArgFromDisplay(&"argument"),
+                            position: DiagArgFromDisplay(&"in binding"),
                         });
                         hir::TyKind::Err(guar)
                     }
                     ImplTraitContext::FeatureGated(position, feature) => {
+                        let mut feature_ = feature;
+                        if feature == sym::impl_trait_in_bindings {
+                          feature_ = sym::some_trait_in_bindings;
+                        }
                         let guar = self
                             .tcx
                             .sess
                             .create_feature_err(
-                                MisplacedImplTrait {
+                                MisplacedSomeTrait {
                                     span: t.span,
                                     position: DiagArgFromDisplay(&position),
                                 },
-                                feature,
+                                feature_,
                             )
                             .emit();
                         hir::TyKind::Err(guar)
                     }
                     ImplTraitContext::Disallowed(position) => {
-                        let guar = self.dcx().emit_err(MisplacedImplTrait {
+                        let guar = self.dcx().emit_err(MisplacedSomeTrait {
                             span: t.span,
                             position: DiagArgFromDisplay(&position),
                         });

@@ -771,6 +771,7 @@ impl<'a> Parser<'a> {
                     // This notably includes paths passed through `ty` macro fragments (#46438).
                     TyKind::Path(None, path) => path,
                     other => {
+                      // JUHYUNG 잘못된 문법 알려주는 거라서 지금 구현 안바꾸어도 됨.
                         if let TyKind::ImplTrait(_, bounds) = other
                             && let [bound] = bounds.as_slice()
                             && let GenericBound::Trait(poly_trait_ref) = bound

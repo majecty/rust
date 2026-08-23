@@ -1872,6 +1872,10 @@ impl InvocationCollectorNode for ast::Ty {
             let name = Symbol::intern(&pprust::ty_to_string(self).replace('\n', " "));
             collector.cx.resolver.insert_impl_trait_name(self.id, name);
         }
+        if let ast::TyKind::ImplSome(..) = self.kind {
+            let name = Symbol::intern(&pprust::ty_to_string(self).replace('\n', " "));
+            collector.cx.resolver.insert_impl_trait_name(self.id, name);
+        }
         walk_ty(collector, self)
     }
     fn is_mac_call(&self) -> bool {

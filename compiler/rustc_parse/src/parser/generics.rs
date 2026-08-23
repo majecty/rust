@@ -59,6 +59,7 @@ impl<'a> Parser<'a> {
                 let impl_span = self.token.span;
                 let snapshot = self.create_snapshot_for_diagnostic();
                 match self.parse_ty() {
+                  // JUHYUNG implTrait이 잘못 들어온 경우 에러 잘 찍기 위한 거라 수정 불필요.
                     Ok(p) => {
                         if let TyKind::ImplTrait(_, bounds) = &p.kind {
                             let span = impl_span.to(self.token.span.shrink_to_lo());

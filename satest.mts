@@ -71,7 +71,8 @@ function usage(): void {
   console.error(`usage: $0 [--build] [--build-std] [--sample=some|any] [--log[=LEVEL]] [lex|parse|hir|mir|full] ...`);
   console.error(`  --build          run ./x.py build --stage 1 --keep-stage-std 1 first`);
   console.error(`  --build-std      run ./x.py build --stage 1 (rebuilds stdlib too) first`);
-  console.error(`  --sample=NAME    test sample source (default: some -> someany/test.rs)`);
+  console.error(`  --sample=NAME    test sample source (default: some)`);
+  console.error(`                   one of: ${Object.keys(SAMPLES).join(", ")}`);
   console.error(`  --run            run the compiled binary after the full stage`);
   console.error(`  --log[=LEVEL]    show compiler output and set RUSTC_LOG (default: info)`);
 }
