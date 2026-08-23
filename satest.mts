@@ -46,6 +46,8 @@ const STAGES: Record<StageName, Stage> = {
 const SAMPLES: Record<string, string> = {
   some: "./someany/test.rs",
   any: "./someany/any_test.rs",
+  some_arg: "./someany/some_arg_test.rs",
+  some_type: "./someany/some_type_test.rs",
 };
 
 const RUSTC = ["rustup", "run", "stage1", "rustc"];
@@ -135,7 +137,8 @@ let failed: StageName | null = null;
 const src = SAMPLES[sample];
 for (const label of stages) {
   const { desc, flags, out } = STAGES[label];
-  const args = [src, ...flags, ...(out ? ["-o", join(outDir, out)] : [])];
+  const outName = out === "test" ? sample : out === "test.mir" ? `${sample}.mir` : out;
+  const args = [src, ...flags, ...(outName ? ["-o", join(outDir, outName)] : [])];
   console.log(`== ${label.padEnd(6)}  ${desc}`);
 
   const { ok, output } = runRustc(args, label);
@@ -159,14 +162,14 @@ if (failed) {
 }
 
 if (requested.length === 0) {
-  console.log(`\nAll stages passed. binary: ${join(outDir, "test")}`);
+  console.log(`\nAll stages passed. binary: ${join(outDir, sample)}`);
 }
 if (logLevel) {
   console.log(`logs: ${outDir} (RUSTC_LOG=${logLevel})`);
 }
 
 if (run) {
-  const binary = join(outDir, "test");
+  const binary = join(outDir, sample);
   if (failed || !(stages.includes("full"))) {
     console.error(`\n--run requires the 'full' stage; run: node satest.mts full --run`);
     process.exit(2);
