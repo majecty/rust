@@ -25,7 +25,7 @@ import { spawnSync } from "node:child_process";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-type StageName = "lex" | "parse" | "hir" | "mir" | "full";
+type StageName = "lex" | "parse" | "ast-tree" | "hir" | "mir" | "full";
 
 interface Stage {
   desc: string;
@@ -38,6 +38,7 @@ interface Stage {
 const STAGES: Record<StageName, Stage> = {
   lex:   { desc: "parse crate root only",    flags: ["-Z", "parse-crate-root-only"], out: null },
   parse: { desc: "parse + expand + resolve", flags: ["-Z", "no-analysis"],           out: null },
+  "ast-tree": { desc: "dump AST (before expansion)", flags: ["-Z", "unpretty=ast-tree"], out: null },
   hir:   { desc: "lower to HIR",             flags: ["-Z", "unpretty=hir"],          out: null },
   mir:   { desc: "build MIR",                flags: ["--emit", "mir"],               out: "test.mir" },
   full:  { desc: "codegen and link",         flags: [],                              out: "test" },
@@ -152,7 +153,12 @@ for (const label of stages) {
   }
 
   console.log("   OK");
-  if (logLevel && output.trim().length) {
+  if (out) {
+    console.log(`   out: ${join(outDir, outName!)}`);
+  } else {
+    console.log(`   src: ${src}`);
+  }
+  if (output.trim().length) {
     console.log(output.trimEnd());
   }
 }

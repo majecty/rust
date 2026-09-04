@@ -15,7 +15,7 @@ use rustc_session::lint::builtin::{
 };
 use rustc_session::parse::ParseSess;
 use rustc_span::{BytePos, Pos, Span, Symbol, sym};
-use tracing::debug;
+use tracing::{debug, info};
 
 use crate::lexer::diagnostics::TokenTreeDiagInfo;
 use crate::lexer::unicode_chars::UNICODE_ARRAY;
@@ -105,6 +105,7 @@ pub(crate) fn lex_token_trees<'psess, 'src>(
     match res {
         Ok((_open_spacing, stream)) => {
             if unmatched_closing_delims.is_empty() {
+        info!("JUHYUNG lex_token_trees: returning Ok with stream: {:#?}", stream);
                 Ok(stream)
             } else {
                 // Return error if there are unmatched delimiters or unclosed delimiters.

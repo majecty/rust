@@ -3786,6 +3786,16 @@ pub struct OpaqueTy<'hir> {
     pub span: Span,
 }
 
+#[derive(Debug, Clone, Copy, StableHash)]
+pub struct SomeTraitTy<'hir> {
+    #[stable_hash(ignore)]
+    pub hir_id: HirId,
+    pub def_id: LocalDefId,
+    pub bounds: GenericBounds<'hir>,
+    pub origin: OpaqueTyOrigin<LocalDefId>,
+    pub span: Span,
+}
+
 #[derive(Debug, Clone, Copy, StableHash, Encodable, Decodable)]
 pub enum PreciseCapturingArgKind<T, U> {
     Lifetime(T),

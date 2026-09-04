@@ -13,6 +13,7 @@ use std::path::{Path, PathBuf};
 use std::str::Utf8Error;
 use std::sync::Arc;
 
+use tracing::info;
 use rustc_ast as ast;
 use rustc_ast::token;
 use rustc_ast::tokenstream::{DelimSpacing, DelimSpan, Spacing, TokenStream, TokenTree};
@@ -263,6 +264,11 @@ fn source_file_to_stream<'psess>(
     override_span: Option<Span>,
     strip_tokens: StripTokens,
 ) -> Result<TokenStream, Vec<Diag<'psess>>> {
+  info!(
+        "JUHYUNG source_file_to_stream: {}",
+        psess.source_map().filename_for_diagnostics(&source_file.name)
+    );
+
     let src = source_file.src.as_ref().unwrap_or_else(|| {
         psess.dcx().bug(format!(
             "cannot lex `source_file` without source: {}",

@@ -1,0 +1,577 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AST → HIR Lowering 진입점 추적 (code-explorer)</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --bg2: #161b22;
+    --bg3: #1c2129;
+    --border: #30363d;
+    --fg: #c9d1d9;
+    --fg-dim: #8b949e;
+    --accent: #58a6ff;
+    --accent2: #f0883e;
+    --kw: #ff7b72;
+    --ty: #d2a8ff;
+    --str: #a5d6ff;
+    --num: #79c0ff;
+    --com: #7ee787;
+    --fnc: #d2a8ff;
+    --card-bg: #161b22;
+    --hl: #2a2f3a;
+    --hl-border: #58a6ff;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: "SF Mono", "Fira Code", "DejaVu Sans Mono", Menlo, Consolas, monospace;
+    font-size: 13px;
+    line-height: 1.55;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow-x: hidden;
+  }
+  header {
+    background: var(--bg2);
+    border-bottom: 1px solid var(--border);
+    padding: 10px 18px;
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+    flex-wrap: wrap;
+    flex: 0 0 auto;
+  }
+  header h1 { font-size: 15px; color: var(--accent); font-weight: 600; }
+  header .path { color: var(--fg-dim); font-size: 12px; }
+  header .meta { color: var(--fg-dim); font-size: 12px; margin-left: auto; }
+  .legend { color: var(--fg-dim); font-size: 11px; display: flex; gap: 12px; align-items: center; }
+  .legend span b { color: var(--fg); font-weight: 500; }
+
+  main {
+    display: flex;
+    flex: 0 0 auto;
+    height: 78vh;
+    min-height: 0;
+  }
+  .pane {
+    overflow-y: auto;
+    min-width: 0;
+  }
+  .pane::-webkit-scrollbar { width: 10px; }
+  .pane::-webkit-scrollbar-thumb { background: var(--border); border-radius: 5px; }
+  .pane::-webkit-scrollbar-track { background: transparent; }
+
+  #codePane {
+    flex: 1 1 50%;
+    border-right: 1px solid var(--border);
+    background: var(--bg);
+    padding: 10px 0;
+  }
+  .line {
+    display: flex;
+    padding-right: 18px;
+    cursor: crosshair;
+  }
+  .line .ln {
+    flex: 0 0 52px;
+    text-align: right;
+    padding-right: 14px;
+    color: var(--fg-dim);
+    user-select: none;
+    font-size: 12px;
+  }
+  .line pre {
+    flex: 1 1 auto;
+    white-space: pre;
+    font-family: inherit;
+    font-size: 13px;
+    color: var(--fg);
+    padding-right: 8px;
+  }
+  .line:hover { background: var(--bg3); }
+  .line.active { background: var(--hl); }
+  .line.active .ln { color: var(--hl-border); font-weight: bold; }
+
+  #expPane {
+    flex: 1 1 50%;
+    background: var(--bg2);
+    padding: 16px;
+  }
+  .card {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--border);
+    border-radius: 6px;
+    padding: 10px 12px;
+    margin-bottom: 12px;
+    cursor: pointer;
+    transition: border-color .15s, background .15s;
+  }
+  .card:hover { background: var(--bg3); }
+  .card.active {
+    border-color: var(--hl-border);
+    border-left-color: var(--accent);
+    background: var(--bg3);
+  }
+  .card .lrange {
+    display: inline-block;
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 1px 7px;
+    font-size: 11px;
+    color: var(--accent2);
+    margin-bottom: 6px;
+  }
+  .card h3 { font-size: 13px; color: var(--accent); margin-bottom: 5px; font-weight: 600; }
+  .card ul { padding-left: 18px; margin: 4px 0; }
+  .card li { margin-bottom: 3px; }
+  .card p { margin-bottom: 4px; }
+  .card code {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 0 4px;
+    color: var(--str);
+    font-family: inherit;
+    font-size: 12px;
+  }
+  .card .fold { display: none; }
+  .card.open .fold { display: block; }
+  .card .expander {
+    color: var(--fg-dim);
+    font-size: 11px;
+    margin-top: 2px;
+    user-select: none;
+  }
+
+  sections {
+    display: flex;
+    flex-direction: column;
+  }
+  .doc {
+    margin: 18px 16px 60px;
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px 20px;
+    color: var(--fg);
+    font-family: "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+    font-size: 13px;
+    line-height: 1.7;
+  }
+  .doc h2 { color: var(--accent); font-size: 15px; margin: 14px 0 8px; }
+  .doc h2:first-child { margin-top: 0; }
+  .doc code {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 1px 5px;
+    font-family: inherit;
+    color: var(--str);
+  }
+  .doc table { border-collapse: collapse; margin: 8px 0; width: 100%; }
+  .doc th, .doc td { border: 1px solid var(--border); padding: 5px 9px; text-align: left; }
+  .doc th { background: var(--bg3); color: var(--accent); }
+  .doc pre {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 10px 12px;
+    overflow-x: auto;
+    font-size: 12px;
+    line-height: 1.5;
+  }
+  .doc pre code { background: none; border: none; padding: 0; color: inherit; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>AST → HIR Lowering 진입점 추적</h1>
+  <span class="path">compiler/rustc_ast_lowering/src/lib.rs : 656</span>
+  <span class="legend">
+    <span><b style="color:var(--kw)">keyword</b></span>
+    <span><b style="color:var(--ty)">type</b></span>
+    <span><b style="color:var(--str)">string</b></span>
+    <span><b style="color:var(--com)">comment</b></span>
+    <span>라인에 마우스 올리기 / 카드 클릭으로 동기화</span>
+  </span>
+  <span class="meta" id="posLabel">—</span>
+</header>
+
+<main>
+  <!-- ================= CODE PANE ================= -->
+  <div class="pane" id="codePane"></div>
+
+  <!-- ================= EXPLAIN PANE ================= -->
+  <div class="pane" id="expPane"></div>
+</main>
+
+<section class="doc">
+  <h2>전체 호출 체인 (AST → HIR)</h2>
+  <p>러스트 컴파일러는 파싱 후 AST를 HIR로 변환한다. 이 변환은 <b>쿼리 시스템</b>에 의해
+  HIR owner(<code>LocalDefId</code>) 단위로 게으르게(lazy) 수행된다. 진입 쿼리는
+  <code>lower_to_hir</code>이며, 아래 코드에서 그 구현을 따라간다.</p>
+
+  <pre><code>query lower_to_hir(def_id)              queries.rs:222
+  └ provider lower_to_hir              lib.rs:102 (provide), impl lib.rs:656
+       ├ tcx.index_ast(()) → AstOwner  index.rs (AST 노드 → owner 매핑)
+       └ match node:
+           Crate(c)   → ItemLowerer::lower_crate(&c)    item.rs:72
+           Item(i)    → ItemLowerer::lower_item(&i)     item.rs:82
+           TraitItem  → lower_trait_item                item.rs:86
+           ImplItem   → lower_impl_item                 item.rs:90
+           ForeignItem→ lower_foreign_item               item.rs:94
+hir_owner provider                        hir/mod.rs:458 → tcx.lower_to_hir(def_id)</code></pre>
+
+  <h2>lower_to_hir 이후의 내부 흐름</h2>
+  <p>디스패치된 각 메서드는 동일한 <code>LoweringContext</code> 위에서 실제 AST 노드를 순회하며 HIR을 빌드한다.</p>
+  <pre><code>lower_crate (item.rs:72)
+  └ lower_mod      (item.rs:100) → lower_item_ref (item.rs:114) : 모듈의 item_ids 구성
+  └ lower_attrs                  : 크레이트 레벨 속성
+
+lower_item (item.rs:209, 실제 변환)
+  └ lower_item_kind (item.rs:234) → match ItemKind::Fn / Static / Const …
+       └ lower_fn_decl   (lib.rs:1992) : 함수 시그니처(fn(…) → …) 변환
+       └ lower_fn_body   (item.rs:1361) ─┐
+                                          ├ lower_body (item.rs:1337) → record_body
+            lower_param  (item.rs:1350) ─┘</code></pre>
+
+  <h2>핵심 포인트</h2>
+  <ul>
+    <li><b>Lazy per-owner lowering</b> — 전체 크레이트를 한 번에 내리는 게 아니라, HIR 노드가 필요해질 때마다 해당 <code>LocalDefId</code>에 대해 쿼리가 실행된다.</li>
+    <li><b>AstOwner 인덱스</b> — <code>index_ast</code>가 AST 노드 ID를 HIR owner로 매핑하며, AST에 없는 중첩 정의(enum variant field 등)는 <code>fallback_to_ancestor</code>로 부모 owner에서 가져온다.</li>
+    <li><b>arena 할당</b> — 모든 HIR 노드는 <code>lctx.arena</code>에 할당되어 수명을 <code>'hir</code>로 묶는다.</li>
+  </ul>
+</section>
+
+<script>
+/* ------------------------------------------------------------------
+ *  코드 데이터 (한 줄씩). lib.rs 의 lower_to_hir (라인 656–710)
+ * ------------------------------------------------------------------ */
+const CODE = [
+  "#[instrument(level = \"trace\", skip(tcx))]",
+  "fn lower_to_hir(tcx: TyCtxt<'_>, def_id: LocalDefId) -> hir::MaybeOwner<'_> {",
+  "    let ast_index = tcx.index_ast(());",
+  "    let resolver_and_node = ast_index.get(def_id).map(Steal::steal);",
+  "",
+  "    let fallback_to_ancestor = |parent_id| {",
+  "        // The item did not exist in the AST, it was created while lowering another item.",
+  "        // `parent_id` may be different from the direct parent of `def_id`,",
+  "        // for instance use-trees are lowered by the first sibling.",
+  "        let mut parent_info = tcx.lower_to_hir(parent_id);",
+  "        if let hir::MaybeOwner::NonOwner(hir_id) = parent_info {",
+  "            // `parent_id` could also not be a owner either.",
+  "            // For instance if `def_id` is an enum variant field,",
+  "            // the direct parent is the enum variant.",
+  "            // In that case `hir_id.owner` point to the actual HIR owner",
+  "            // and skips all non-owner parents, so fetch the HIR associated to it.",
+  "            parent_info = tcx.lower_to_hir(hir_id.owner);",
+  "        }",
+  "",
+  "        let parent_info = parent_info.unwrap();",
+  "        *parent_info.children.get(&def_id).unwrap_or_else(|| {",
+  "            panic!(",
+  "                \"{:?} does not appear in children of {:?}\",",
+  "                def_id,",
+  "                parent_info.nodes.node().def_id()",
+  "            )",
+  "        })",
+  "    };",
+  "",
+  "    let Some((resolver, node)) = resolver_and_node else {",
+  "        // `ast_index` does not contain all definitions, only up-to the highest",
+  "        // `LocalDefId` which has a non-trivial `AstOwner`. Gracefully handle",
+  "        // other definitions, in particular those nested inside this highest definition.",
+  "        return fallback_to_ancestor(tcx.local_parent(def_id));",
+  "    };",
+  "",
+  "    let mut item_lowerer = item::ItemLowerer { tcx, resolver: &*resolver };",
+  "",
+  "    let item = match &node {",
+  "        // The item existed in the AST.",
+  "        AstOwner::Crate(c) => item_lowerer.lower_crate(&c),",
+  "        AstOwner::Item(item) => item_lowerer.lower_item(&item),",
+  "        AstOwner::TraitItem(item) => item_lowerer.lower_trait_item(&item),",
+  "        AstOwner::ImplItem(item) => item_lowerer.lower_impl_item(&item),",
+  "        AstOwner::ForeignItem(item) => item_lowerer.lower_foreign_item(&item),",
+  "        AstOwner::NestedUseTree(owner_id) => fallback_to_ancestor(*owner_id),",
+  "        // The item existed in the AST, but is not a HIR owner.",
+  "        // Fetch the correct information from its parent.",
+  "        AstOwner::NonOwner => fallback_to_ancestor(tcx.local_parent(def_id)),",
+  "    };",
+  "",
+  "    tcx.sess.time(\"drop_ast\", || mem::drop(node));",
+  "",
+  "    item",
+  "}",
+]
+
+/* ------------------------------------------------------------------
+ *  설명 카드 데이터. start~end 는 위 코드의 인덱스(0 기반).
+ * ------------------------------------------------------------------ */
+const CARDS = [
+  {
+    start: 0, end: 3,
+    title: "① 쿼리 진입점 lower_to_hir",
+    body: `
+      <p>AST → HIR 변환의 <b>실제 진입 함수</b>. 쿼리 시스템이 <code>LocalDefId</code> 하나에 대해 호출한다.</p>
+      <ul>
+        <li><code>tcx.index_ast(())</code> (line 658): 파싱된 AST 노드 ID → <code>AstOwner</code> 매핑을 조회한다 (빌드: index.rs).</li>
+        <li><code>ast_index.get(def_id).map(Steal::steal)</code>: 해당 def_id의 리졸버+AST 노드를 가져온다. <code>Steal</code>은 소유권을 빼앗아 AST를 소비함을 뜻한다.</li>
+        <li>provider 등록 위치는 <code>lib.rs:102</code>(<code>provide</code>)이며 쿼리 정의는 <code>queries.rs:222</code>.</li>
+      </ul>`
+  },
+  {
+    start: 5, end: 27,
+    title: "② fallback_to_ancestor — AST에 없는 중첩 정의 처리",
+    body: `
+      <p>어떤 <code>def_id</code>는 AST에 직접 노드로 존재하지 않는다(예: enum variant field, use-tree). 이 클로저는 그런 경우 부모 owner에서 HIR을 찾아온다.</p>
+      <ul>
+        <li>line 665: <code>tcx.lower_to_hir(parent_id)</code> 를 재귀 호출해 부모를 먼저 내린다.</li>
+        <li>line 666-673: 부모마저 <code>NonOwner</code>면 실제 owner까지 타고 올라가(<code>hir_id.owner</code>) 다시 조회한다.</li>
+        <li>line 676-682: 찾은 부모의 <code>children</code> 맵에서 이 <code>def_id</code>에 대응하는 HIR 노드를 꺼낸다. 없으면 panic.</li>
+      </ul>`
+  },
+  {
+    start: 29, end: 34,
+    title: "③ ast_index 조회 실패 시 부모로 폴백",
+    body: `
+      <p>이번 <code>def_id</code>가 <code>ast_index</code>에 아예 없는 경우(가장 높은 <code>AstOwner</code>보다 깊게 중첩된 정의).</p>
+      <ul>
+        <li><code>let Some(...) = resolver_and_node else</code> (line 685): 조회 결과가 <code>None</code>이면 즉시 <code>fallback_to_ancestor</code>로 위임한다.</li>
+        <li>line 689: 직접 부모 <code>tcx.local_parent(def_id)</code>를 통해 HIR을 획득하므로 게으른 lowering이 안전하게 동작한다.</li>
+      </ul>`
+  },
+  {
+    start: 36, end: 49,
+    title: "④ ItemLowerer 생성 및 AstOwner 분기 디스패치",
+    body: `
+      <p>AST 노드를 실제로 순회하며 HIR을 만드는 컨텍스트를 준비하고, 노드 종류에 따라 적절한 메서드로 분기한다.</p>
+      <ul>
+        <li>line 692: <code>item::ItemLowerer { tcx, resolver }</code> 생성. 이후 모든 변환은 이 컨텍스트 위에서 수행된다.</li>
+        <li>line 696: <code>AstOwner::Crate(c)</code> → <code>lower_crate(&c)</code> (item.rs:72). 크레이트 루트 진입점.</li>
+        <li>line 697: <code>AstOwner::Item</code> → <code>lower_item(&item)</code> (item.rs:82). 일반 아이템.</li>
+        <li>line 698-700: trait/impl/foreign 아이템용 전용 메서드로 디스패치.</li>
+        <li>line 701, 704: use-tree/NonOwner는 부모로 폴백.</li>
+      </ul>`
+  },
+  {
+    start: 51, end: 54,
+    title: "⑤ AST 드롭 및 결과 반환",
+    body: `
+      <p>변환이 끝난 AST 노드는 메모리를 되찾기 위해 명시적으로 버린다.</p>
+      <ul>
+        <li>line 707: <code>tcx.sess.time(\"drop_ast\", …)</code> 로 드롭 시간을 측정하며 <code>mem::drop(node)</code> 실행.</li>
+        <li>line 709: 만들어진 <code>hir::MaybeOwner</code>를 반환. 쿼리 결과로 캐싱되어 이후 재사용된다.</li>
+      </ul>`
+  },
+]
+
+/* ------------------------------------------------------------------
+ *  간단한 구문 하이라이터 (파싱/외부 라이브러리 불필요)
+ * ------------------------------------------------------------------ */
+const KEYWORDS = new Set([
+  "fn","let","if","else","match","return","true","false","self","this",
+  "as","ref","mut","dyn","impl","and","or","Some","None","Ok","Err","in","for","while",
+  "Some","None",
+]);
+const TYPES = new Set([
+  "TyCtxt","LocalDefId","MaybeOwner","AstOwner","ItemLowerer","Steal","Crate",
+  "Item","TraitItem","ImplItem","ForeignItem","NestedUseTree","NonOwner","HirId",
+]);
+
+function escapeHtml(s) {
+  return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+}
+
+function highlightLine(line) {
+  const trimmed = line.trimStart();
+  if (trimmed.startsWith("//")) {
+    return `<span class="com">${escapeHtml(line)}</span>`;
+  }
+  let out = "";
+  let i = 0;
+  const n = line.length;
+  while (i < n) {
+    const c = line[i];
+    if (c === " " || c === "\t") { out += c; i++; continue; }
+    // 문자열
+    if (c === '"' || c === "'") {
+      const delim = c;
+      let j = i + 1;
+      while (j < n && line[j] !== delim) {
+        if (line[j] === "\\") { j++; }
+        j++;
+      }
+      j = Math.min(j + 1, n);
+      out += `<span class="str">${escapeHtml(line.slice(i, j))}</span>`;
+      i = j;
+      continue;
+    }
+    // 식별자
+    if (/[A-Za-z_]/.test(c)) {
+      let j = i;
+      while (j < n && /[A-Za-z0-9_]/.test(line[j])) j++;
+      const word = line.slice(i, j);
+      const cls = KEYWORDS.has(word) ? "kw"
+                : (TYPES.has(word) ? "ty"
+                : (j < n && line[j] === "(" || j < n && line[j] === "!" ? "fnc" : ""));
+      out += cls ? `<span class="${cls}">${escapeHtml(word)}</span>` : escapeHtml(word);
+      i = j;
+      continue;
+    }
+    // 숫자
+    if (/[0-9]/.test(c)) {
+      let j = i;
+      while (j < n && /[0-9a-fA-FxX.]/.test(line[j])) j++;
+      out += `<span class="num">${escapeHtml(line.slice(i, j))}</span>`;
+      i = j;
+      continue;
+    }
+    out += escapeHtml(c);
+    i++;
+  }
+  return out;
+}
+
+/* ------------------------------------------------------------------
+ *  렌더링
+ * ------------------------------------------------------------------ */
+const START_LINE = 656;
+const codePane = document.getElementById("codePane");
+const expPane = document.getElementById("expPane");
+
+const lineEls = CODE.map((line, idx) => {
+  const el = document.createElement("div");
+  el.className = "line";
+  el.dataset.line = idx;
+  el.innerHTML = `<span class="ln">${START_LINE + idx}</span><pre>${highlightLine(line) || "\u00A0"}</pre>`;
+  codePane.appendChild(el);
+  return el;
+});
+
+CARDS.forEach((card) => {
+  const el = document.createElement("div");
+  el.className = "card";
+  el.dataset.start = card.start;
+  el.dataset.end = card.end;
+  const lines = card.start === card.end ? `${START_LINE + card.start}` : `${START_LINE + card.start}–${START_LINE + card.end}`;
+  el.innerHTML = `
+    <span class="lrange">라인 ${lines}</span>
+    <h3>${card.title}</h3>
+    <div class="fold">${card.body}</div>`;
+  el.addEventListener("click", () => {
+    el.classList.toggle("open");
+    const first = lineEls[card.start];
+    codePane.scrollTo({ top: first.offsetTop - codePane.clientHeight / 3, behavior: "smooth" });
+  });
+  el.querySelector("h3").addEventListener("click", (ev) => {
+    ev.stopPropagation();
+    el.classList.toggle("open");
+  });
+  expPane.appendChild(el);
+});
+const cardEls = [...expPane.querySelectorAll(".card")];
+
+/* ------------------------------------------------------------------
+ *  하이라이트 동기화 (자동 스크롤 없음)
+ * ------------------------------------------------------------------ */
+function clearLineActive() {
+  lineEls.forEach((l) => l.classList.remove("active"));
+}
+function clearCardActive() {
+  cardEls.forEach((c) => c.classList.remove("active"));
+}
+
+function cardForLine(idx) {
+  return cardEls.find((c) => +c.dataset.start <= idx && idx <= +c.dataset.end);
+}
+function cardTopLine(el) {
+  return +el.dataset.start;
+}
+
+codePane.addEventListener("scroll", () => {
+  let idx = 0;
+  const mid = codePane.scrollTop + codePane.clientHeight * 0.2;
+  for (let k = 0; k < lineEls.length; k++) {
+    if (lineEls[k].offsetTop <= mid) idx = k; else break;
+  }
+  const card = cardForLine(idx);
+  clearLineActive();
+  clearCardActive();
+  if (card) {
+    card.classList.add("active");
+    if (!card.classList.contains("open")) card.classList.add("open");
+  }
+  const ln = lineEls[idx].querySelector(".ln").textContent;
+  document.getElementById("posLabel").textContent = `▶ ${ln}`;
+});
+
+expPane.addEventListener("scroll", () => {
+  let card = null;
+  const mid = expPane.scrollTop + expPane.clientHeight * 0.2;
+  for (const c of cardEls) {
+    if (c.offsetTop <= mid) card = c; else break;
+  }
+  if (card) {
+    const first = cardTopLine(card);
+    const last = +card.dataset.end;
+    clearLineActive();
+    clearCardActive();
+    for (let k = first; k <= last; k++) lineEls[k].classList.add("active");
+    card.classList.add("active");
+  }
+});
+
+lineEls.forEach((line) => {
+  line.addEventListener("mouseenter", () => {
+    const idx = +line.dataset.line;
+    const card = cardForLine(idx);
+    clearLineActive();
+    clearCardActive();
+    line.classList.add("active");
+    document.getElementById("posLabel").textContent = `▶ 라인 ${START_LINE + idx}`;
+    if (card) {
+      card.classList.add("active");
+    }
+  });
+  line.addEventListener("mouseleave", () => {
+    setTimeout(() => {
+      if (!expPane.matches(":hover")) {
+        const idx = cardTopLine(cardEls[0]);
+        for (let k = idx; k <= +cardEls[0].dataset.end; k++) lineEls[k].classList.add("active");
+        cardEls[0].classList.add("active");
+      }
+    }, 60);
+  });
+});
+
+cardEls.forEach((card) => {
+  card.addEventListener("mouseenter", () => {
+    clearLineActive();
+    clearCardActive();
+    for (let k = +card.dataset.start; k <= +card.dataset.end; k++) lineEls[k].classList.add("active");
+    card.classList.add("active");
+  });
+  card.addEventListener("mouseleave", () => {
+    if (!codePane.matches(":hover")) {
+      card.classList.remove("active");
+    }
+  });
+});
+
+(function init() {
+  for (let k = 0; k <= +cardEls[0].dataset.end; k++) lineEls[k].classList.add("active");
+  cardEls[0].classList.add("active");
+  cardEls[0].classList.add("open");
+})();
+</script>
+</body>
+</html>

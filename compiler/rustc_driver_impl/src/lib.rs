@@ -62,7 +62,7 @@ use rustc_span::def_id::LOCAL_CRATE;
 use rustc_span::{DUMMY_SP, FileName};
 use rustc_target::json::ToJson;
 use rustc_target::spec::{Target, TargetTuple};
-use tracing::trace;
+use tracing::{trace,info};
 
 #[allow(unused_macros)]
 macro do_not_use_print($($t:tt)*) {
@@ -169,6 +169,7 @@ impl Callbacks for TimePassesCallbacks {
 
 /// This is the primary entry point for rustc.
 pub fn run_compiler(at_args: &[String], callbacks: &mut (dyn Callbacks + Send)) {
+        info!("JUHYUNG rustc version: {}", env!("CFG_VERSION"));
     let mut default_early_dcx = EarlyDiagCtxt::new(ErrorOutputType::default());
 
     // Throw away the first argument, the name of the binary.

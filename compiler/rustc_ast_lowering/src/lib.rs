@@ -1916,6 +1916,32 @@ impl<'hir> LoweringContext<'_, 'hir> {
         })
     }
 
+    #[instrument(level = "debug", skip(self), ret)]
+    fn lower_opaque_impl_trait_for_some(
+        &mut self,
+        span: Span,
+        origin: hir::OpaqueTyOrigin<LocalDefId>,
+        opaque_ty_node_id: NodeId,
+        bounds: &GenericBounds,
+        itctx: ImplTraitContext,
+    ) -> hir::TyKind<'hir> {
+        // Make sure we know that some funky desugaring has been going on here.
+        // This is a first: there is code in other places like for loop
+        // desugaring that explicitly states that we don't want to track that.
+        // Not tracking it makes lints in rustc and clippy very fragile, as
+        // frequently opened issues show.
+        let opaque_ty_span = self.mark_span_with_reason(DesugaringKind::OpaqueTy, span, None);
+
+        self.lower_opaque_inner(opaque_ty_node_id, origin, opaque_ty_span, |this| {
+            this.lower_param_bounds(
+                bounds,
+                RelaxedBoundPolicy::Allowed(&mut Default::default()),
+                itctx,
+            )
+        })
+    }
+
+
     fn lower_opaque_inner(
         &mut self,
         opaque_ty_node_id: NodeId,
