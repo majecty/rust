@@ -1,6 +1,5 @@
 //! rtoy driver — minimal counterpart to `compiler/rustc_driver`.
-//! Original: empty re-export + `rustc_driver_impl::run_compiler(args -> Session -> interface -> passes -> codegen)`.
-//! Toy: `main -> run(args) -> read file -> stub compile`.
+//! 흐름: main -> run(args) -> read file -> lex -> (stub) parse/lower.
 
 use std::process::ExitCode;
 
@@ -9,7 +8,7 @@ pub const EXIT_FAILURE: i32 = 1;
 
 fn print_help() {
     println!("rtoy <file.rs> — minimal rustc_driver toy");
-    println!("  passes (stub): parse -> ast_lower -> hir -> done");
+    println!("  passes (stub): lex -> parse -> ast_lower -> hir -> done");
 }
 
 fn run(args: &[String]) -> i32 {
@@ -24,8 +23,14 @@ fn run(args: &[String]) -> i32 {
     }
     match std::fs::read_to_string(path) {
         Ok(src) => {
-            // TODO: lexer -> parser -> ast_lowering (stub for now)
-            println!("ok: {} bytes from {}", src.len(), path);
+            let tokens = rtoy_lexer::tokenize(&src);
+            let code: Vec<_> = tokens
+                .iter()
+                .filter(|t| t.kind != rtoy_lexer::TokenKind::Whitespace)
+                .map(|t| &src[t.start..t.end])
+                .collect();
+            println!("ok: {} tokens, first 10: {:?}", code.len(), &code[..code.len().min(10)]);
+            // TODO: parser -> ast_lowering (stub for now)
             EXIT_SUCCESS
         }
         Err(e) => {

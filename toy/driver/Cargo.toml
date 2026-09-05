@@ -1,0 +1,7 @@
+[package]
+name = "rtoy-driver"
+version = "0.0.1"
+edition = "2021"
+
+[dependencies]
+rtoy-lexer = { path = "../lexer" }

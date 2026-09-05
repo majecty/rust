@@ -3501,7 +3501,14 @@ dependencies = [
 ]
 
 [[package]]
-name = "rtoy"
+name = "rtoy-driver"
+version = "0.0.1"
+dependencies = [
+ "rtoy-lexer",
+]
+
+[[package]]
+name = "rtoy-lexer"
 version = "0.0.1"
 
 [[package]]
