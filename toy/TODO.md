@@ -1,13 +1,14 @@
 # rtoy 진행 상황
 
-> rustc를 축소한 학습용 컴파일러. driver/lexer 분리 완료, 다음 단계는 parser.
+> rustc를 축소한 학습용 컴파일러. driver/lexer/ast 얼개 완료, 다음 단계는 parser.
 
-## 현재 상태 (2025-09-05)
-- 워크스페이스: `~/code/rust` members에 `toy/driver`, `toy/lexer` 등록됨
+## 현재 상태 (2026-09-05)
+- 워크스페이스: `~/code/rust` members에 `toy/ast`, `toy/driver`, `toy/lexer` 등록됨
 - `rtoy-lexer`: char_indices 기반 tokenize (Ident/Int/Whitespace/Punct) + 테스트 1개
-- `rtoy-driver`: 파일 읽기 → lex → 토큰 10개 출력 (parse/lowering은 stub)
+- `rtoy-ast`: Span/Crate/Item/ItemKind::Fn/Block/Stmt/Expr 얼개 + `dummy_crate()` + 테스트 1개
+- `rtoy-driver`: 파일 읽기 → lex → 토큰 10개 + `ast: dummy_crate` 출력 (parser/lowering은 stub)
 - 실행: `cd toy && ./run [file.rs]` (기본 입력 `toy/test.rs`)
-- 커밋: `fbf5a62`(TODO 추가) ← `80b62ab`(driver/lexer 분리) ← `544912c`(toy 워크스페이스 편입)
+- 커밋: `6324147`(ast 얼개) ← `3e9399b`(TODO 보강) ← `fbf5a62`(TODO 추가)
 - rustc 대응물 학습 기록은 위키 참조 (`Cursor::advance_token` 등 lexer 비교 분석 포함)
 
 ## rustc_lexer 대비 (2025-09-05 조사)
@@ -22,10 +23,10 @@
 
 ## 다음 단계 (우선순위 순)
 - [ ] rustc_lexer 대비 보강: 주석(LineComment/BlockComment)을 토큰으로, pull 방식 Cursor로 전환 검토
-- [ ] AST 노드 정의 (`rustc_ast::token/ast.rs` 대비, 최소: Crate/Item/Fn/Block/Expr)
+- [x] AST 노드 정의 (`rustc_ast::token/ast.rs` 대비, 최소: Crate/Item/Fn/Block/Expr) — 얼개만, Let/Var/Call은 TODO
 - [ ] parser crate 분리 (`toy/parser`) — token stream → AST, rustc_parse 대비
 - [ ] ast_lowering 스텁 — AST → 간단 HIR (driver 내부 또는 `toy/lowering`)
-- [ ] Span 타입 도입 (start/end → rustc_span 대비)
+- [x] Span 타입 도입 (start/end → rustc_span 대비) — `rtoy-ast::Span{start,end}` 최소형
 - [ ] 위키 연동: 완성된 단계마다 `[[rust-*]]` 페이지로 정리
 
 ## 관련 위키
