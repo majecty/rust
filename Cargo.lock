@@ -3501,15 +3501,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "rtoy-ast"
+version = "0.0.1"
+
+[[package]]
 name = "rtoy-driver"
 version = "0.0.1"
 dependencies = [
+ "rtoy-ast",
  "rtoy-lexer",
+ "rtoy-tokenstream-lowering",
 ]
 
 [[package]]
 name = "rtoy-lexer"
 version = "0.0.1"
+
+[[package]]
+name = "rtoy-tokenstream-lowering"
+version = "0.0.1"
+dependencies = [
+ "rtoy-ast",
+ "rtoy-lexer",
+]
 
 [[package]]
 name = "run_make_support"
