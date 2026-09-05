@@ -30,6 +30,7 @@ fn run(args: &[String]) -> i32 {
                 .map(|t| &src[t.start..t.end])
                 .collect();
             println!("ok: {} tokens, first 10: {:?}", code.len(), &code[..code.len().min(10)]);
+            println!("ast: {:?}", rtoy_ast::dummy_crate());
             // TODO: parser -> ast_lowering (stub for now)
             EXIT_SUCCESS
         }
