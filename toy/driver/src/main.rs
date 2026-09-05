@@ -24,13 +24,8 @@ fn run(args: &[String]) -> i32 {
     match std::fs::read_to_string(path) {
         Ok(src) => {
             let tokens = rtoy_lexer::tokenize(&src);
-            let code: Vec<_> = tokens
-                .iter()
-                .filter(|t| t.kind != rtoy_lexer::TokenKind::Whitespace)
-                .map(|t| &src[t.start..t.end])
-                .collect();
-            println!("ok: {} tokens, first 10: {:?}", code.len(), &code[..code.len().min(10)]);
-            println!("ast: {:?}", rtoy_ast::dummy_crate());
+            let krate = rtoy_tokenstream_lowering::lower(&tokens, &src);
+            println!("ast: {:#?}", krate);
             // TODO: parser -> ast_lowering (stub for now)
             EXIT_SUCCESS
         }

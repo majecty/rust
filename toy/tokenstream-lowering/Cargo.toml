@@ -1,9 +1,8 @@
 [package]
-name = "rtoy-driver"
+name = "rtoy-tokenstream-lowering"
 version = "0.0.1"
 edition = "2021"
 
 [dependencies]
 rtoy-lexer = { path = "../lexer" }
 rtoy-ast = { path = "../ast" }
-rtoy-tokenstream-lowering = { path = "../tokenstream-lowering" }

@@ -49,6 +49,7 @@ members = [
   "toy/ast",
   "toy/driver",
   "toy/lexer",
+  "toy/tokenstream-lowering",
 # tidy-alphabetical-end
 ]
 
