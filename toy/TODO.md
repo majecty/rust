@@ -32,8 +32,8 @@
 - [x] Lexer: `//` 라인 주석 토큰 (`Comment`) ([상세](docs/lexer.md))
 - [x] AST: Let 바인딩 (`LetStmt`) ([상세](docs/ast.md))
 - [x] Lowering: 다중 stmt·빈몸 `{}`·`skip_trivia` ([상세](docs/lowering.md))
-- [ ] Span 확장: `Ident{name,span}` → Item/Let 이름에 적용
-- [ ] Span 확장: `Ty{kind,span}` → Let ty에 적용
+- [x] Span 확장: `Ident{name,span}` → Item/Let 이름에 적용
+- [x] Span 확장: `Ty{kind,span}` → Let ty에 적용
 - [ ] Span 확장: `Stmt{kind,span}` + `StmtKind` (rustc 패리티)
 - [ ] Span 확장: `Crate/FnItem` 전체 span
 - [ ] Lexer: 블록주석·pull Cursor 전환 ([상세](docs/lexer.md))
