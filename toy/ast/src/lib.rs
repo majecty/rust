@@ -4,6 +4,18 @@
 pub use rtoy_span::Span;
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct Ident {
+    pub name: String,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Ty {
+    pub name: String,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct Crate {
     pub items: Vec<Item>,
 }
@@ -36,7 +48,15 @@ pub struct Block {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Stmt {
     Expr(Expr),
-    // TODO: picks: Let(..)
+    Let(LetStmt),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct LetStmt {
+    pub name: String,
+    pub ty: Option<String>,
+    pub init: Option<Expr>,
+    pub span: Span,
 }
 
 #[derive(Debug, Clone, PartialEq)]
