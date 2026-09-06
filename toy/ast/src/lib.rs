@@ -53,8 +53,8 @@ pub enum Stmt {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct LetStmt {
-    pub name: String,
-    pub ty: Option<String>,
+    pub name: Ident,
+    pub ty: Option<Ty>,
     pub init: Option<Expr>,
     pub span: Span,
 }

@@ -1,7 +1,7 @@
 //! rtoy tokenstream-lowering — token stream → AST.
 //! Original: compiler/rustc_parse (parser/expr.rs, item.rs).
 
-use rtoy_ast::{Block, Crate, Expr, ExprKind, FnItem, Ident, Item, ItemKind, LetStmt, Stmt};
+use rtoy_ast::{Block, Crate, Expr, ExprKind, FnItem, Ident, Item, ItemKind, LetStmt, Stmt, Ty};
 use rtoy_span::{Span, SpanError};
 use rtoy_lexer::{Token, TokenKind};
 
@@ -116,12 +116,14 @@ impl<'a> Lowering<'a> {
         let let_tok = self.expect_ident("let stmt", "let")?;
         let name_tok = self.expect("let name", TokenKind::Ident, "variable name")?;
         let name = self.peek_text(&name_tok).map_err(|e| LowerError { context: "let name", expected: "valid variable name".into(), found: Some((name_tok.kind, "<invalid span>".into(), name_tok.span)), pos: self.pos, source: Some(e) })?;
+        let name = Ident { name, span: name_tok.span };
         self.skip_trivia();
-        let mut ty: Option<String> = None;
+        let mut ty: Option<Ty> = None;
         if self.peek_is_punct(':') {
             self.bump();
             let ty_tok = self.expect("let type", TokenKind::Ident, "type name")?;
-            ty = Some(self.peek_text(&ty_tok).map_err(|e| LowerError { context: "let type", expected: "valid type name".into(), found: Some((ty_tok.kind, "<invalid span>".into(), ty_tok.span)), pos: self.pos, source: Some(e) })?);
+            let ty_text = self.peek_text(&ty_tok).map_err(|e| LowerError { context: "let type", expected: "valid type name".into(), found: Some((ty_tok.kind, "<invalid span>".into(), ty_tok.span)), pos: self.pos, source: Some(e) })?;
+            ty = Some(Ty { name: ty_text, span: ty_tok.span });
         }
         self.expect_punct("let eq", '=')?;
         let init = self.parse_int_expr()?;
@@ -277,7 +279,7 @@ mod tests {
 
     #[test]
     fn spans_cover_source() {
-        let src = "fn main() { 42 }";
+        let src = "fn main() { let x: u32 = 42; }";
         let toks = tokenize(src);
         let krate = lower(&toks, src);
         let item = &krate.items[0];
@@ -285,9 +287,14 @@ mod tests {
         assert_eq!(item.name.span.snippet(src), "main");
         match &item.kind {
             ItemKind::Fn(f) => {
-                assert_eq!(f.body.span.snippet(src), "{ 42 }");
-                let tail = f.body.tail.as_ref().unwrap();
-                assert_eq!(tail.span.snippet(src), "42");
+                assert_eq!(f.body.span.snippet(src), "{ let x: u32 = 42; }");
+                let stmt = match &f.body.stmts[0] {
+                    Stmt::Let(l) => l,
+                    other => panic!("expected let stmt, got {other:?}"),
+                };
+                assert_eq!(stmt.name.span.snippet(src), "x");
+                assert_eq!(stmt.ty.as_ref().unwrap().span.snippet(src), "u32");
+                assert_eq!(stmt.span.snippet(src), "let x: u32 = 42");
             }
         }
     }
