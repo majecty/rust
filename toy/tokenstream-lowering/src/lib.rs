@@ -1,7 +1,7 @@
 //! rtoy tokenstream-lowering — token stream → AST.
 //! Original: compiler/rustc_parse (parser/expr.rs, item.rs).
 
-use rtoy_ast::{Block, Crate, Expr, ExprKind, FnItem, Item, ItemKind, LetStmt, Stmt};
+use rtoy_ast::{Block, Crate, Expr, ExprKind, FnItem, Ident, Item, ItemKind, LetStmt, Stmt};
 use rtoy_span::{Span, SpanError};
 use rtoy_lexer::{Token, TokenKind};
 
@@ -70,15 +70,16 @@ impl<'a> Lowering<'a> {
     }
 
     /// fn 헤더. 예: `fn main()`.
-    fn parse_fn_head(&mut self) -> Result<(Token, String), LowerError> {
+    fn parse_fn_head(&mut self) -> Result<(Token, Ident), LowerError> {
         self.skip_whitespace();
         let t = self.expect_ident("fn keyword", "fn")?;
         self.skip_whitespace();
         let name_tok = self.expect("fn name", TokenKind::Ident, "function name")?;
         let name = self.peek_text(&name_tok).map_err(|e| LowerError { context: "fn name", expected: "valid function name".into(), found: Some((name_tok.kind, "<invalid span>".into(), name_tok.span)), pos: self.pos, source: Some(e) })?;
+        let ident = Ident { name, span: name_tok.span };
         self.expect_punct("fn params", '(')?;
         self.expect_punct("fn params", ')')?;
-        Ok((t, name))
+        Ok((t, ident))
     }
 
     /// 블록. 예: `{ let x = 1; 42 }`, `{ 42 }`.
@@ -265,7 +266,7 @@ mod tests {
         let toks = tokenize(src);
         let krate = lower(&toks, src);
         assert_eq!(krate.items.len(), 1);
-        assert_eq!(krate.items[0].name, "main");
+        assert_eq!(krate.items[0].name.name, "main");
         match &krate.items[0].kind {
             ItemKind::Fn(f) => match &f.body.tail.as_ref().unwrap().kind {
                 ExprKind::Int(42) => {}
@@ -281,6 +282,7 @@ mod tests {
         let krate = lower(&toks, src);
         let item = &krate.items[0];
         assert_eq!(item.span.snippet(src), src);
+        assert_eq!(item.name.span.snippet(src), "main");
         match &item.kind {
             ItemKind::Fn(f) => {
                 assert_eq!(f.body.span.snippet(src), "{ 42 }");

@@ -22,7 +22,7 @@ pub struct Crate {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Item {
-    pub name: String,
+    pub name: Ident,
     pub kind: ItemKind,
     pub span: Span,
 }
@@ -76,7 +76,7 @@ pub fn dummy_crate() -> Crate {
     let s = Span::dummy();
     Crate {
         items: vec![Item {
-            name: "main".into(),
+            name: Ident { name: "main".into(), span: s },
             kind: ItemKind::Fn(FnItem {
                 body: Block { stmts: vec![], tail: None, span: s },
             }),
@@ -91,6 +91,6 @@ mod tests {
 
     #[test]
     fn builds_dummy() {
-        assert_eq!(dummy_crate().items[0].name, "main");
+        assert_eq!(dummy_crate().items[0].name.name, "main");
     }
 }
