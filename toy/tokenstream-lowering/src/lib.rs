@@ -53,12 +53,15 @@ impl<'a> Lowering<'a> {
     /// 크레이트 전체 (엄격). 예: `fn main() { 42 } fn foo() { 1 }`.
     pub fn try_parse_crate(&mut self) -> Result<Crate, LowerError> {
         let mut items = Vec::new();
+        self.skip_whitespace();
+        let start = self.peek().map(|t| t.span.start).unwrap_or(0);
         loop {
             self.skip_whitespace();
             if self.peek().is_none() { break; }
             items.push(self.parse_item()?);
         }
-        Ok(Crate { items })
+        let end = items.last().map(|i| i.span.end).unwrap_or(start);
+        Ok(Crate { items, span: Span::new(start, end) })
     }
 
     /// 아이템 하나. 예: `fn main() { 42 }`.
@@ -66,7 +69,7 @@ impl<'a> Lowering<'a> {
         let (fn_tok, name) = self.parse_fn_head()?;
         let body = self.parse_block()?;
         let span = Span::new(fn_tok.span.start, body.span.end);
-        Ok(Item { name, kind: ItemKind::Fn(FnItem { body }), span })
+        Ok(Item { name, kind: ItemKind::Fn(FnItem { body, span }), span })
     }
 
     /// fn 헤더. 예: `fn main()`.
@@ -286,10 +289,12 @@ mod tests {
         let toks = tokenize(src);
         let krate = lower(&toks, src);
         let item = &krate.items[0];
+        assert_eq!(krate.span.snippet(src), "fn main() { let x: u32 = 42; }");
         assert_eq!(item.span.snippet(src), src);
         assert_eq!(item.name.span.snippet(src), "main");
         match &item.kind {
             ItemKind::Fn(f) => {
+                assert_eq!(f.span.snippet(src), "fn main() { let x: u32 = 42; }");
                 assert_eq!(f.body.span.snippet(src), "{ let x: u32 = 42; }");
                 let stmt = match &f.body.stmts[0] {
                     Stmt { kind: StmtKind::Let(l), span: s } => {

@@ -18,6 +18,7 @@ pub struct Ty {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Crate {
     pub items: Vec<Item>,
+    pub span: Span,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -36,6 +37,7 @@ pub enum ItemKind {
 #[derive(Debug, Clone, PartialEq)]
 pub struct FnItem {
     pub body: Block,
+    pub span: Span,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -82,10 +84,12 @@ pub enum ExprKind {
 pub fn dummy_crate() -> Crate {
     let s = Span::dummy();
     Crate {
+        span: s,
         items: vec![Item {
             name: Ident { name: "main".into(), span: s },
             kind: ItemKind::Fn(FnItem {
                 body: Block { stmts: vec![], tail: None, span: s },
+                span: s,
             }),
             span: s,
         }],
