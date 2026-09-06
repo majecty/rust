@@ -1,6 +1,8 @@
 //! rtoy lexer — 토크나이저.
 //! Original: compiler/rustc_lexer (cursor.rs, token.rs).
 
+use rtoy_span::Span;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TokenKind {
     Ident,
@@ -12,8 +14,7 @@ pub enum TokenKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Token {
     pub kind: TokenKind,
-    pub start: usize,
-    pub end: usize,
+    pub span: Span,
 }
 
 /// 입력 전체를 토큰 리스트로 변환.
@@ -43,7 +44,7 @@ pub fn tokenize(src: &str) -> Vec<Token> {
             TokenKind::Punct
         };
         let end = chars.get(i).map(|(p, _)| *p).unwrap_or(src.len());
-        tokens.push(Token { kind, start, end });
+        tokens.push(Token { kind, span: Span::new(start, end) });
     }
     tokens
 }

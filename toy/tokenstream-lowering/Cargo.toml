@@ -6,3 +6,4 @@ edition = "2021"
 [dependencies]
 rtoy-lexer = { path = "../lexer" }
 rtoy-ast = { path = "../ast" }
+rtoy-span = { path = "../span" }

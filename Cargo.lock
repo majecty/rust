@@ -3503,6 +3503,9 @@ dependencies = [
 [[package]]
 name = "rtoy-ast"
 version = "0.0.1"
+dependencies = [
+ "rtoy-span",
+]
 
 [[package]]
 name = "rtoy-driver"
@@ -3516,6 +3519,13 @@ dependencies = [
 [[package]]
 name = "rtoy-lexer"
 version = "0.0.1"
+dependencies = [
+ "rtoy-span",
+]
+
+[[package]]
+name = "rtoy-span"
+version = "0.0.1"
 
 [[package]]
 name = "rtoy-tokenstream-lowering"
@@ -3523,6 +3533,7 @@ version = "0.0.1"
 dependencies = [
  "rtoy-ast",
  "rtoy-lexer",
+ "rtoy-span",
 ]
 
 [[package]]
