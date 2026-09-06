@@ -7,8 +7,9 @@ pub const EXIT_SUCCESS: i32 = 0;
 pub const EXIT_FAILURE: i32 = 1;
 
 fn print_help() {
-    println!("rtoy [--lex] <file.rs> — minimal rustc_driver toy");
+    println!("rtoy [--lex|--ast] <file.rs> — minimal rustc_driver toy");
     println!("  --lex: lex 결과물만 출력하고 종료");
+    println!("  --ast: AST까지 출력하고 종료 (기본 동작과 동일, 명시용)");
     println!("  passes (stub): lex -> parse -> ast_lower -> hir -> done");
 }
 
@@ -25,10 +26,13 @@ fn print_error_chain(top: &str, err: &dyn std::error::Error) {
 
 fn run(args: &[String]) -> i32 {
     let mut lex_only = false;
+    let mut ast_only = false;
     let mut path: Option<&String> = None;
     for arg in &args[1..] {
         if arg == "--lex" {
             lex_only = true;
+        } else if arg == "--ast" {
+            ast_only = true;
         } else if arg == "--help" || arg == "-h" {
             print_help();
             return EXIT_SUCCESS;
@@ -38,6 +42,11 @@ fn run(args: &[String]) -> i32 {
             print_help();
             return EXIT_FAILURE;
         }
+    }
+    if lex_only && ast_only {
+        eprintln!("error: --lex와 --ast는 함께 쓸 수 없음");
+        print_help();
+        return EXIT_FAILURE;
     }
     let Some(path) = path else {
         print_help();

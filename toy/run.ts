@@ -50,7 +50,7 @@ function cargoOrExit(args: string[], cwd: string, env: NodeJS.ProcessEnv, label:
 
 const root = resolveRoot();
 const passthrough = process.argv.slice(2);
-// 플래그만 있고 파일이 없으면 (--lex 등) 기본 입력 test.rs를 뒤에 붙인다.
+// 플래그만 있고 파일이 없으면 (--lex/--ast 등) 기본 입력 test.rs를 뒤에 붙인다.
 const hasFile = passthrough.some((a) => !a.startsWith("-"));
 const driverArgs = hasFile ? passthrough : [...passthrough, join(root, "test.rs")];
 const env: NodeJS.ProcessEnv = { ...process.env, CARGO_TARGET_DIR: resolveTargetDir() };
