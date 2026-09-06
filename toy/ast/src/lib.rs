@@ -46,9 +46,16 @@ pub struct Block {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum Stmt {
+pub enum StmtKind {
     Expr(Expr),
     Let(LetStmt),
+}
+
+/// rustc처럼 stmt 자체가 span을 가진다 (`Stmt{kind, span}`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Stmt {
+    pub kind: StmtKind,
+    pub span: Span,
 }
 
 #[derive(Debug, Clone, PartialEq)]

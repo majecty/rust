@@ -1,7 +1,7 @@
 //! rtoy tokenstream-lowering — token stream → AST.
 //! Original: compiler/rustc_parse (parser/expr.rs, item.rs).
 
-use rtoy_ast::{Block, Crate, Expr, ExprKind, FnItem, Ident, Item, ItemKind, LetStmt, Stmt, Ty};
+use rtoy_ast::{Block, Crate, Expr, ExprKind, FnItem, Ident, Item, ItemKind, LetStmt, Stmt, StmtKind, Ty};
 use rtoy_span::{Span, SpanError};
 use rtoy_lexer::{Token, TokenKind};
 
@@ -95,16 +95,19 @@ impl<'a> Lowering<'a> {
                 return Ok(Block { stmts, tail, span });
             }
             if self.peek_is_ident("let") {
+                let let_tok = self.peek().copied();
                 let stmt = self.parse_let_stmt()?;
-                self.expect_punct("let semi", ';')?;
-                stmts.push(Stmt::Let(stmt));
+                let semi = self.expect_punct("let semi", ';')?;
+                let span = Span::new(let_tok.map(|t| t.span.start).unwrap_or(stmt.span.start), semi.span.end);
+                stmts.push(Stmt { kind: StmtKind::Let(stmt), span });
                 continue;
             }
             let expr = self.parse_int_expr()?;
             self.skip_trivia();
             if self.peek_is_punct(';') {
-                self.bump();
-                stmts.push(Stmt::Expr(expr));
+                let semi = self.bump().expect("peeked `;`");
+                let span = Span::new(expr.span.start, semi.span.end);
+                stmts.push(Stmt { kind: StmtKind::Expr(expr), span });
             } else {
                 tail = Some(expr);
             }
@@ -289,12 +292,16 @@ mod tests {
             ItemKind::Fn(f) => {
                 assert_eq!(f.body.span.snippet(src), "{ let x: u32 = 42; }");
                 let stmt = match &f.body.stmts[0] {
-                    Stmt::Let(l) => l,
+                    Stmt { kind: StmtKind::Let(l), span: s } => {
+                        assert_eq!(s.snippet(src), "let x: u32 = 42;");
+                        l
+                    }
                     other => panic!("expected let stmt, got {other:?}"),
                 };
                 assert_eq!(stmt.name.span.snippet(src), "x");
                 assert_eq!(stmt.ty.as_ref().unwrap().span.snippet(src), "u32");
                 assert_eq!(stmt.span.snippet(src), "let x: u32 = 42");
+                assert_eq!(stmt.init.as_ref().unwrap().span.snippet(src), "42");
             }
         }
     }
