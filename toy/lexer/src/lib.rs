@@ -9,6 +9,7 @@ pub enum TokenKind {
     Int,
     Punct,
     Whitespace,
+    Comment,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -39,6 +40,13 @@ pub fn tokenize(src: &str) -> Vec<Token> {
                 i += 1;
             }
             TokenKind::Whitespace
+        } else if c == '/' && chars.get(i + 1).is_some_and(|(_, n)| *n == '/') {
+            // `//` 라인 주석: 개행 전까지 Comment 1개 (개행은 Whitespace로 남김).
+            i += 2;
+            while i < chars.len() && chars[i].1 != '\n' {
+                i += 1;
+            }
+            TokenKind::Comment
         } else {
             i += 1;
             TokenKind::Punct

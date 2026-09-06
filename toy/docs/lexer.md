@@ -7,7 +7,7 @@
 
 ## 2. 우리 방식
 - `Vec<Token>` push 방식, char_indices 기반
-- 토큰: Ident/Int/Whitespace/Punct
+- 토큰: Ident/Int/Whitespace/Punct/Comment (`//` 라인주석, 개행 제외)
 - 테스트 1개 통과 중
 
 ## 3. 차이·전환 검토
@@ -15,7 +15,7 @@
 - 미구현 항목은 아래 목록 참조
 
 ## 4. 미구현 목록
-- LineComment / BlockComment 토큰화
+- BlockComment 토큰화
 - 키워드 판별
 - 숫자 접미사·float
 - raw 문자열 `r#".."#`
