@@ -1,7 +1,7 @@
 //! rtoy tokenstream-lowering — token stream → AST.
 //! Original: compiler/rustc_parse (parser/expr.rs, item.rs).
 
-use rtoy_ast::{Block, Crate, Expr, ExprKind, FnItem, Item, ItemKind};
+use rtoy_ast::{Block, Crate, Expr, ExprKind, FnItem, Item, ItemKind, LetStmt, Stmt};
 use rtoy_span::{Span, SpanError};
 use rtoy_lexer::{Token, TokenKind};
 
@@ -45,6 +45,133 @@ impl<'a> Lowering<'a> {
         Self { tokens, src, pos: 0 }
     }
 
+    /// 크레이트 전체. 예: `fn main() { 42 } fn foo() { 1 }`.
+    pub fn parse_crate(&mut self) -> Crate {
+        self.try_parse_crate().unwrap_or_else(|e| panic!("lowering failed: {e}"))
+    }
+
+    /// 크레이트 전체 (엄격). 예: `fn main() { 42 } fn foo() { 1 }`.
+    pub fn try_parse_crate(&mut self) -> Result<Crate, LowerError> {
+        let mut items = Vec::new();
+        loop {
+            self.skip_whitespace();
+            if self.peek().is_none() { break; }
+            items.push(self.parse_item()?);
+        }
+        Ok(Crate { items })
+    }
+
+    /// 아이템 하나. 예: `fn main() { 42 }`.
+    fn parse_item(&mut self) -> Result<Item, LowerError> {
+        let (fn_tok, name) = self.parse_fn_head()?;
+        let body = self.parse_block()?;
+        let span = Span::new(fn_tok.span.start, body.span.end);
+        Ok(Item { name, kind: ItemKind::Fn(FnItem { body }), span })
+    }
+
+    /// fn 헤더. 예: `fn main()`.
+    fn parse_fn_head(&mut self) -> Result<(Token, String), LowerError> {
+        self.skip_whitespace();
+        let t = self.expect_ident("fn keyword", "fn")?;
+        self.skip_whitespace();
+        let name_tok = self.expect("fn name", TokenKind::Ident, "function name")?;
+        let name = self.peek_text(&name_tok).map_err(|e| LowerError { context: "fn name", expected: "valid function name".into(), found: Some((name_tok.kind, "<invalid span>".into(), name_tok.span)), pos: self.pos, source: Some(e) })?;
+        self.expect_punct("fn params", '(')?;
+        self.expect_punct("fn params", ')')?;
+        Ok((t, name))
+    }
+
+    /// 블록. 예: `{ let x = 1; 42 }`, `{ 42 }`.
+    fn parse_block(&mut self) -> Result<Block, LowerError> {
+        let open = self.expect_punct("block", '{')?;
+        let mut stmts = Vec::new();
+        let mut tail: Option<Expr> = None;
+        loop {
+            self.skip_trivia();
+            if self.peek_is_punct('}') {
+                let close = self.bump().expect("peeked `}`");
+                let span = Span::new(open.span.start, close.span.end);
+                return Ok(Block { stmts, tail, span });
+            }
+            if self.peek_is_ident("let") {
+                let stmt = self.parse_let_stmt()?;
+                self.expect_punct("let semi", ';')?;
+                stmts.push(Stmt::Let(stmt));
+                continue;
+            }
+            let expr = self.parse_int_expr()?;
+            self.skip_trivia();
+            if self.peek_is_punct(';') {
+                self.bump();
+                stmts.push(Stmt::Expr(expr));
+            } else {
+                tail = Some(expr);
+            }
+        }
+    }
+
+    /// let문. 예: `let x = 42`, `let x: i32 = 42` (뒤 `;`는 호출자가 소비).
+    fn parse_let_stmt(&mut self) -> Result<LetStmt, LowerError> {
+        let let_tok = self.expect_ident("let stmt", "let")?;
+        let name_tok = self.expect("let name", TokenKind::Ident, "variable name")?;
+        let name = self.peek_text(&name_tok).map_err(|e| LowerError { context: "let name", expected: "valid variable name".into(), found: Some((name_tok.kind, "<invalid span>".into(), name_tok.span)), pos: self.pos, source: Some(e) })?;
+        self.skip_trivia();
+        let mut ty: Option<String> = None;
+        if self.peek_is_punct(':') {
+            self.bump();
+            let ty_tok = self.expect("let type", TokenKind::Ident, "type name")?;
+            ty = Some(self.peek_text(&ty_tok).map_err(|e| LowerError { context: "let type", expected: "valid type name".into(), found: Some((ty_tok.kind, "<invalid span>".into(), ty_tok.span)), pos: self.pos, source: Some(e) })?);
+        }
+        self.expect_punct("let eq", '=')?;
+        let init = self.parse_int_expr()?;
+        let span = Span::new(let_tok.span.start, init.span.end);
+        Ok(LetStmt { name, ty, init: Some(init), span })
+    }
+
+    /// 정수식. 예: `42`.
+    fn parse_int_expr(&mut self) -> Result<Expr, LowerError> {
+        self.skip_trivia();
+        let Some(t) = self.bump() else {
+            return Err(self.fail("block body", "expression or `}`"));
+        };
+        match t.kind {
+            TokenKind::Int => {
+                let text = self.peek_text(&t).map_err(|e| LowerError { context: "int literal", expected: "valid int text".into(), found: Some((t.kind, "<invalid span>".into(), t.span)), pos: self.pos, source: Some(e) })?;
+                match text.parse::<i64>() {
+                    Ok(n) => Ok(Expr { kind: ExprKind::Int(n), span: t.span }),
+                    Err(inner) => Err(LowerError {
+                        context: "int literal",
+                        expected: format!("i64 (got {text:?}; parse failed: {inner})"),
+                        found: Some((t.kind, text, t.span)),
+                        pos: self.pos,
+                        source: None,
+                    }),
+                }
+            }
+            _ => Err(LowerError {
+                context: "block body",
+                expected: "int literal or `}`".into(),
+                found: Some((t.kind, self.peek_text(&t).unwrap_or_default(), t.span)),
+                pos: self.pos,
+                source: None,
+            }),
+        }
+    }
+
+    fn peek_is_punct(&self, want: char) -> bool {
+        match self.peek() {
+            Some(t) if t.kind == TokenKind::Punct => t.span.try_snippet(self.src).as_deref() == Ok(want.to_string().as_str()),
+            _ => false,
+        }
+    }
+
+    fn peek_is_ident(&self, want: &str) -> bool {
+        match self.peek() {
+            Some(t) if t.kind == TokenKind::Ident => t.span.try_snippet(self.src).as_deref() == Ok(want),
+            _ => false,
+        }
+    }
+
     fn peek(&self) -> Option<&Token> {
         self.tokens.get(self.pos)
     }
@@ -58,7 +185,12 @@ impl<'a> Lowering<'a> {
     }
 
     fn skip_whitespace(&mut self) {
-        while matches!(self.peek(), Some(t) if t.kind == TokenKind::Whitespace) {
+        self.skip_trivia();
+    }
+
+    /// whitespace + `//` 주석 스킵 (rustc 파서가 주석을 건너뛰듯).
+    fn skip_trivia(&mut self) {
+        while matches!(self.peek(), Some(t) if t.kind == TokenKind::Whitespace || t.kind == TokenKind::Comment) {
             self.bump();
         }
     }
@@ -107,81 +239,6 @@ impl<'a> Lowering<'a> {
             Ok(s) if s == want.to_string() => Ok(t),
             Ok(_) => Err(LowerError { context, expected: format!("'{want}'"), found: Some((t.kind, self.peek_text(&t).unwrap_or_default(), t.span)), pos: self.pos, source: None }),
             Err(e) => Err(LowerError { context, expected: "valid punct text".into(), found: Some((t.kind, "<invalid span>".into(), t.span)), pos, source: Some(e) }),
-        }
-    }
-
-
-    pub fn parse_crate(&mut self) -> Crate {
-        self.try_parse_crate().unwrap_or_else(|e| panic!("lowering failed: {e}"))
-    }
-
-    pub fn try_parse_crate(&mut self) -> Result<Crate, LowerError> {
-        let mut items = Vec::new();
-        loop {
-            self.skip_whitespace();
-            if self.peek().is_none() { break; }
-            items.push(self.parse_item()?);
-        }
-        Ok(Crate { items })
-    }
-
-    fn parse_item(&mut self) -> Result<Item, LowerError> {
-        let (fn_tok, name) = self.parse_fn_head()?;
-        let body = self.parse_block()?;
-        let span = Span::new(fn_tok.span.start, body.span.end);
-        Ok(Item { name, kind: ItemKind::Fn(FnItem { body }), span })
-    }
-
-    fn parse_fn_head(&mut self) -> Result<(Token, String), LowerError> {
-        self.skip_whitespace();
-        let t = self.expect_ident("fn keyword", "fn")?;
-        self.skip_whitespace();
-        let name_tok = self.expect("fn name", TokenKind::Ident, "function name")?;
-        let name = self.peek_text(&name_tok).map_err(|e| LowerError { context: "fn name", expected: "valid function name".into(), found: Some((name_tok.kind, "<invalid span>".into(), name_tok.span)), pos: self.pos, source: Some(e) })?;
-        self.expect_punct("fn params", '(')?;
-        self.expect_punct("fn params", ')')?;
-        Ok((t, name))
-    }
-
-    fn parse_block(&mut self) -> Result<Block, LowerError> {
-        let open = self.expect_punct("block", '{')?;
-        let tail = self.parse_expr()?;
-        let close = self.expect_punct("block", '}')?;
-        let span = Span::new(open.span.start, close.span.end);
-        Ok(Block { stmts: vec![], tail, span })
-    }
-
-    fn parse_expr(&mut self) -> Result<Option<Expr>, LowerError> {
-        self.skip_whitespace();
-        let Some(t) = self.bump() else {
-            return Err(self.fail("block body", "expression or `}`"));
-        };
-        match t.kind {
-            TokenKind::Int => {
-                let text = self.peek_text(&t).map_err(|e| LowerError { context: "int literal", expected: "valid int text".into(), found: Some((t.kind, "<invalid span>".into(), t.span)), pos: self.pos, source: Some(e) })?;
-                match text.parse::<i64>() {
-                    Ok(n) => Ok(Some(Expr { kind: ExprKind::Int(n), span: t.span })),
-                    Err(inner) => Err(LowerError {
-                        context: "int literal",
-                        expected: format!("i64 (got {text:?}; parse failed: {inner})"),
-                        found: Some((t.kind, text, t.span)),
-                        pos: self.pos,
-                        source: None,
-                    }),
-                }
-            }
-            // 빈 몸통 `{}`: 닫는 괄호를 보면 토큰을 되돌리고 tail 없음.
-            TokenKind::Punct if self.peek_text(&t).as_deref() == Ok("}") => {
-                self.pos = self.pos.saturating_sub(1);
-                Ok(None)
-            }
-            _ => Err(LowerError {
-                context: "block body",
-                expected: "int literal or `}`".into(),
-                found: Some((t.kind, self.peek_text(&t).unwrap_or_default(), t.span)),
-                pos: self.pos,
-                source: None,
-            }),
         }
     }
 }
