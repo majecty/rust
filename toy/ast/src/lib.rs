@@ -77,7 +77,10 @@ pub struct Expr {
 #[derive(Debug, Clone, PartialEq)]
 pub enum ExprKind {
     Int(i64),
-    // TODO: picks: Var, Call, Block
+    Var(Ident),
+    /// `foo(a, b)` — callee는 함수 이름만, 인자는 식.
+    Call { callee: Ident, args: Vec<Expr> },
+    // TODO: picks: Block, 이항연산
 }
 
 /// 빈 `fn main(){}` 더미 — driver 배선 확인용.

@@ -105,7 +105,7 @@ impl<'a> Lowering<'a> {
                 stmts.push(Stmt { kind: StmtKind::Let(stmt), span });
                 continue;
             }
-            let expr = self.parse_int_expr()?;
+            let expr = self.parse_expr()?;
             self.skip_trivia();
             if self.peek_is_punct(';') {
                 let semi = self.bump().expect("peeked `;`");
@@ -132,38 +132,78 @@ impl<'a> Lowering<'a> {
             ty = Some(Ty { name: ty_text, span: ty_tok.span });
         }
         self.expect_punct("let eq", '=')?;
-        let init = self.parse_int_expr()?;
+        let init = self.parse_expr()?;
         let span = Span::new(let_tok.span.start, init.span.end);
         Ok(LetStmt { name, ty, init: Some(init), span })
     }
 
-    /// 정수식. 예: `42`.
-    fn parse_int_expr(&mut self) -> Result<Expr, LowerError> {
+    /// 식. 예: `42`, `x`, `foo(1, x)`.
+    fn parse_expr(&mut self) -> Result<Expr, LowerError> {
         self.skip_trivia();
         let Some(t) = self.bump() else {
             return Err(self.fail("block body", "expression or `}`"));
         };
         match t.kind {
-            TokenKind::Int => {
-                let text = self.peek_text(&t).map_err(|e| LowerError { context: "int literal", expected: "valid int text".into(), found: Some((t.kind, "<invalid span>".into(), t.span)), pos: self.pos, source: Some(e) })?;
-                match text.parse::<i64>() {
-                    Ok(n) => Ok(Expr { kind: ExprKind::Int(n), span: t.span }),
-                    Err(inner) => Err(LowerError {
-                        context: "int literal",
-                        expected: format!("i64 (got {text:?}; parse failed: {inner})"),
-                        found: Some((t.kind, text, t.span)),
-                        pos: self.pos,
-                        source: None,
-                    }),
-                }
-            }
+            TokenKind::Int => self.parse_int_lit(t),
+            TokenKind::Ident => self.parse_ident_expr(t),
             _ => Err(LowerError {
                 context: "block body",
-                expected: "int literal or `}`".into(),
+                expected: "expression (int/ident/call)".into(),
                 found: Some((t.kind, self.peek_text(&t).unwrap_or_default(), t.span)),
                 pos: self.pos,
                 source: None,
             }),
+        }
+    }
+
+    /// 정수 리터럴. 예: `42`.
+    fn parse_int_lit(&mut self, t: Token) -> Result<Expr, LowerError> {
+        let text = self.peek_text(&t).map_err(|e| LowerError { context: "int literal", expected: "valid int text".into(), found: Some((t.kind, "<invalid span>".into(), t.span)), pos: self.pos, source: Some(e) })?;
+        match text.parse::<i64>() {
+            Ok(n) => Ok(Expr { kind: ExprKind::Int(n), span: t.span }),
+            Err(inner) => Err(LowerError {
+                context: "int literal",
+                expected: format!("i64 (got {text:?}; parse failed: {inner})"),
+                found: Some((t.kind, text, t.span)),
+                pos: self.pos,
+                source: None,
+            }),
+        }
+    }
+
+    /// 식별자식. 다음 토큰이 `(`면 호출, 아니면 변수 참조.
+    fn parse_ident_expr(&mut self, t: Token) -> Result<Expr, LowerError> {
+        let name = self.peek_text(&t).map_err(|e| LowerError { context: "ident expr", expected: "valid identifier text".into(), found: Some((t.kind, "<invalid span>".into(), t.span)), pos: self.pos, source: Some(e) })?;
+        let ident = Ident { name, span: t.span };
+        let save = self.pos;
+        self.skip_trivia();
+        if self.peek_is_punct('(') {
+            self.bump();
+            let (args, end) = self.parse_call_args()?;
+            let span = Span::new(t.span.start, end);
+            return Ok(Expr { kind: ExprKind::Call { callee: ident, args }, span });
+        }
+        self.pos = save;
+        Ok(Expr { kind: ExprKind::Var(ident), span: t.span })
+    }
+
+    /// 호출 인자. 예: `(1, x)` — `(foo())`의 `)` 끝 오프셋까지 소비.
+    fn parse_call_args(&mut self) -> Result<(Vec<Expr>, usize), LowerError> {
+        let mut args = Vec::new();
+        loop {
+            self.skip_trivia();
+            if self.peek_is_punct(')') {
+                let close = self.bump().expect("peeked `)`");
+                return Ok((args, close.span.end));
+            }
+            args.push(self.parse_expr()?);
+            self.skip_trivia();
+            if self.peek_is_punct(',') {
+                self.bump();
+                continue;
+            }
+            let close = self.expect_punct("call args", ')')?;
+            return Ok((args, close.span.end));
         }
     }
 
@@ -280,6 +320,30 @@ mod tests {
                 ExprKind::Int(42) => {}
                 other => panic!("expected Int(42), got {other:?}"),
             },
+        }
+    }
+
+    #[test]
+    fn lowers_var_and_call() {
+        let src = "fn main() { let x = 1; foo(x, 2) }";
+        let toks = tokenize(src);
+        let krate = lower(&toks, src);
+        match &krate.items[0].kind {
+            ItemKind::Fn(f) => {
+                let tail = f.body.tail.as_ref().unwrap();
+                assert_eq!(tail.span.snippet(src), "foo(x, 2)");
+                match &tail.kind {
+                    ExprKind::Call { callee, args } => {
+                        assert_eq!(callee.name, "foo");
+                        assert_eq!(callee.span.snippet(src), "foo");
+                        assert_eq!(args.len(), 2);
+                        assert_eq!(args[0].span.snippet(src), "x");
+                        assert!(matches!(&args[0].kind, ExprKind::Var(v) if v.name == "x"));
+                        assert!(matches!(&args[1].kind, ExprKind::Int(2)));
+                    }
+                    other => panic!("expected call, got {other:?}"),
+                }
+            }
         }
     }
 
