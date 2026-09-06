@@ -35,7 +35,7 @@
 - [x] Span 확장: `Ident{name,span}` → Item/Let 이름에 적용
 - [x] Span 확장: `Ty{kind,span}` → Let ty에 적용
 - [x] Span 확장: `Stmt{kind,span}` + `StmtKind` (rustc 패리티)
-- [ ] Span 확장: `Crate/FnItem` 전체 span
+- [x] Span 확장: `Crate/FnItem` 전체 span
 - [ ] Lexer: 블록주석·pull Cursor 전환 ([상세](docs/lexer.md))
 - [ ] AST: Var/Call 확장 ([상세](docs/ast.md))
 - [ ] Lowering: 이항 연산 ([상세](docs/lowering.md))
