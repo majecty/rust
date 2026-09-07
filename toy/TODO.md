@@ -38,7 +38,7 @@
 - [x] Span 확장: `Crate/FnItem` 전체 span
 - [ ] Lexer: 블록주석·pull Cursor 전환 ([상세](docs/lexer.md))
 - [x] AST: Var/Call 확장 ([상세](docs/ast.md))
-- [ ] Lowering: 이항 연산 ([상세](docs/lowering.md))
+- [x] Lowering: 이항 연산 ([상세](docs/lowering.md))
 - [ ] Span/docs: `snippet` 범위검사·`docs/status.md` 5-crate 동기화
 - [ ] HIR 스텁: AST → 간단 HIR ([상세](docs/roadmap.md))
 - [ ] 위키 정리: 단계마다 `[[rust-*]]` 페이지
