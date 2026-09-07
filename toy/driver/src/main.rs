@@ -1,6 +1,7 @@
 //! rtoy driver — minimal counterpart to `compiler/rustc_driver`.
 //! 흐름: main -> run(args) -> read file -> lex -> (stub) parse/lower.
 
+use std::error::Error;
 use std::process::ExitCode;
 
 pub const EXIT_SUCCESS: i32 = 0;
@@ -81,6 +82,15 @@ fn run(args: &[String]) -> i32 {
     }
     match rtoy_tokenstream_lowering::try_lower(&tokens, &src) {
         Ok(krate) => {
+            if let Err(errs) = rtoy_resolve::resolve(&krate, &src) {
+                for e in &errs {
+                    eprintln!("error: {e}");
+                    if let Some(src_err) = e.source() {
+                        eprintln!("caused by: {src_err}");
+                    }
+                }
+                return EXIT_FAILURE;
+            }
             println!("ast: {:#?}", krate);
             // TODO: parser -> ast_lowering (stub for now)
             EXIT_SUCCESS

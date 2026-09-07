@@ -1,10 +1,12 @@
 [package]
-name = "rtoy-driver"
+name = "rtoy-resolve"
 version = "0.0.1"
-edition = "2021"
+edition = "2024"
 
 [dependencies]
-rtoy-lexer = { path = "../lexer" }
 rtoy-ast = { path = "../ast" }
+rtoy-span = { path = "../span" }
+
+[dev-dependencies]
+rtoy-lexer = { path = "../lexer" }
 rtoy-tokenstream-lowering = { path = "../tokenstream-lowering" }
-rtoy-resolve = { path = "../resolve" }
