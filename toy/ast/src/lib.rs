@@ -74,13 +74,24 @@ pub struct Expr {
     pub span: Span,
 }
 
+/// 이항 연산자. 우선순위는 lowering 파서가 처리.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BinOp {
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Mod,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum ExprKind {
     Int(i64),
     Var(Ident),
     /// `foo(a, b)` — callee는 함수 이름만, 인자는 식.
     Call { callee: Ident, args: Vec<Expr> },
-    // TODO: picks: Block, 이항연산
+    Binary { op: BinOp, lhs: Box<Expr>, rhs: Box<Expr> },
+    // TODO: picks: Block
 }
 
 /// 빈 `fn main(){}` 더미 — driver 배선 확인용.

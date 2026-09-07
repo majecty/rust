@@ -1,7 +1,7 @@
 //! rtoy tokenstream-lowering — token stream → AST.
 //! Original: compiler/rustc_parse (parser/expr.rs, item.rs).
 
-use rtoy_ast::{Block, Crate, Expr, ExprKind, FnItem, Ident, Item, ItemKind, LetStmt, Stmt, StmtKind, Ty};
+use rtoy_ast::{BinOp, Block, Crate, Expr, ExprKind, FnItem, Ident, Item, ItemKind, LetStmt, Stmt, StmtKind, Ty};
 use rtoy_span::{Span, SpanError};
 use rtoy_lexer::{Token, TokenKind};
 
@@ -137,8 +137,52 @@ impl<'a> Lowering<'a> {
         Ok(LetStmt { name, ty, init: Some(init), span })
     }
 
-    /// 식. 예: `42`, `x`, `foo(1, x)`.
+    /// 식. 예: `42`, `x`, `foo(1, x)`, `1 + 2 * 3`.
     fn parse_expr(&mut self) -> Result<Expr, LowerError> {
+        self.parse_additive()
+    }
+
+    /// 덧셈급. 예: `1 + 2`, `a - b` (좌결합).
+    fn parse_additive(&mut self) -> Result<Expr, LowerError> {
+        let mut lhs = self.parse_multiplicative()?;
+        loop {
+            self.skip_trivia();
+            let Some(op) = self.peek_binop(&[("+", BinOp::Add), ("-", BinOp::Sub)]) else { break };
+            self.bump();
+            let rhs = self.parse_multiplicative()?;
+            lhs = self.join_binary(op, lhs, rhs);
+        }
+        Ok(lhs)
+    }
+
+    /// 곱셈급. 예: `2 * 3`, `8 / 4`, `7 % 2` (좌결합).
+    fn parse_multiplicative(&mut self) -> Result<Expr, LowerError> {
+        let mut lhs = self.parse_atom()?;
+        loop {
+            self.skip_trivia();
+            let Some(op) = self.peek_binop(&[("*", BinOp::Mul), ("/", BinOp::Div), ("%", BinOp::Mod)]) else { break };
+            self.bump();
+            let rhs = self.parse_atom()?;
+            lhs = self.join_binary(op, lhs, rhs);
+        }
+        Ok(lhs)
+    }
+
+    fn join_binary(&self, op: BinOp, lhs: Expr, rhs: Expr) -> Expr {
+        let span = Span::new(lhs.span.start, rhs.span.end);
+        Expr { kind: ExprKind::Binary { op, lhs: Box::new(lhs), rhs: Box::new(rhs) }, span }
+    }
+
+    /// peek가 지정 punct면 (op, true) — 소비는 호출자가 bump로.
+    fn peek_binop(&self, ops: &[(&str, BinOp)]) -> Option<BinOp> {
+        let t = self.peek()?;
+        if t.kind != TokenKind::Punct { return None; }
+        let text = t.span.try_snippet(self.src).ok()?;
+        ops.iter().find(|(s, _)| *s == text).map(|(_, op)| *op)
+    }
+
+    /// 원자식. 예: `42`, `x`, `foo(1)`.
+    fn parse_atom(&mut self) -> Result<Expr, LowerError> {
         self.skip_trivia();
         let Some(t) = self.bump() else {
             return Err(self.fail("block body", "expression or `}`"));
@@ -320,6 +364,27 @@ mod tests {
                 ExprKind::Int(42) => {}
                 other => panic!("expected Int(42), got {other:?}"),
             },
+        }
+    }
+
+    #[test]
+    fn lowers_binary_precedence() {
+        let src = "fn main() { 1 + 2 * 3 }";
+        let toks = tokenize(src);
+        let krate = lower(&toks, src);
+        match &krate.items[0].kind {
+            ItemKind::Fn(f) => {
+                let tail = f.body.tail.as_ref().unwrap();
+                assert_eq!(tail.span.snippet(src), "1 + 2 * 3");
+                match &tail.kind {
+                    ExprKind::Binary { op: BinOp::Add, lhs, rhs } => {
+                        assert_eq!(lhs.span.snippet(src), "1");
+                        assert_eq!(rhs.span.snippet(src), "2 * 3");
+                        assert!(matches!(&rhs.kind, ExprKind::Binary { op: BinOp::Mul, .. }));
+                    }
+                    other => panic!("expected add, got {other:?}"),
+                }
+            }
         }
     }
 
