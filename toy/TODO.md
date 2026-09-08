@@ -5,6 +5,7 @@
 ## 1. 바로 실행
 - `cd toy && ./run [--lex|--ast] [file.rs]` (기본 입력 `toy/test.rs`)
 - `--lex`: 토큰만 출력 · `--ast`: AST 출력 (기본값과 동일, 명시용)
+- `./run --sample <이름>` (`toy/samples/*.rs`, `-h`에 목록)
 - 파이프라인: 파일 읽기 → lex → lowering → AST `{:#?}` 출력
 
 ## 2. 문서 목차
