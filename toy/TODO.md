@@ -15,17 +15,18 @@
 - [로드맵](docs/roadmap.md) — 다음 단계·이슈·위키
 
 ## 3. 현재 상태 요약
-- 워크스페이스 members에 toy 5개 crate 등록 (ast/driver/lexer/span/tokenstream-lowering)
+- 워크스페이스 members에 toy 6개 crate 등록 (ast/driver/lexer/span/tokenstream-lowering/resolve)
 - span: `rtoy-span::Span{start,end}` + `new/dummy/snippet` + 테스트 1개 (`snippet_roundtrip`)
 - lexer: char_indices tokenize + `Comment`(`//`~개행전) + 테스트 1개 (`lexer→ast` 역전 해소)
-- ast: Crate/Item/Fn/Block/Stmt(`Expr`/`Let`)/`LetStmt{name,ty,init}`/Expr + 테스트 1개
-- lowering: `fn name() { stmt* tail? }` pull 파서 + 테스트 2개 (`let name[: ty] = int;`·빈몸 `{}`·`skip_trivia` 지원)
+- ast: Crate/Item/Fn/Block/Stmt(`Expr`/`Let`)/`LetStmt{name,ty,init}`/Expr(`Int`/`Var`/`Call`)/이항연산 + 테스트 1개
+- lowering: `fn name() { stmt* tail? }` pull 파서 + 테스트 4개 (`let`·빈몸·`skip_trivia`·이항연산 우선순위·Var/Call)
+- resolve: 중복 fn 이름 검사 + 테스트 2개
 - driver: lex → lowering → AST 출력 동작 (`test.rs` `let x: u32 = 42;` 통과)
 - Span: lexer→span→ast→lowering 배선 완료
   - `Token.span`, `Item.span`, `Block.span`, `Expr.span` 필드 유지
   - lowering: Item/Block/Expr span 생성 및 연결
-  - `spans_cover_source` 테스트 통과 (총 5개 통과)
-- 알려진 틈: Var/Call/이항연산 미지원·블록주석 미지원·타입은 식별자 1개만·`snippet` 범위검사 없음
+  - `spans_cover_source` 테스트 통과 (총 9개 통과)
+- 알려진 틈: 블록주석 미지원·타입은 식별자 1개만·`snippet` 범위검사 없음
 - 상세 수치는 [현황](docs/status.md) 참조
 
 ## 4. 다음 할 일
