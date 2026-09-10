@@ -3512,10 +3512,20 @@ name = "rtoy-driver"
 version = "0.0.1"
 dependencies = [
  "rtoy-ast",
+ "rtoy-expand",
  "rtoy-lexer",
  "rtoy-resolve",
  "rtoy-span",
  "rtoy-tokenstream-lowering",
+]
+
+[[package]]
+name = "rtoy-expand"
+version = "0.0.1"
+dependencies = [
+ "rtoy-ast",
+ "rtoy-lexer",
+ "rtoy-span",
 ]
 
 [[package]]
