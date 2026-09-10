@@ -3514,6 +3514,7 @@ dependencies = [
  "rtoy-ast",
  "rtoy-lexer",
  "rtoy-resolve",
+ "rtoy-span",
  "rtoy-tokenstream-lowering",
 ]
 
