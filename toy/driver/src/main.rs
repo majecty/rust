@@ -35,6 +35,7 @@ fn print_help() {
     println!("  --lex: lex 결과물만 출력하고 종료");
     println!("  --ast: AST까지 출력하고 종료 (기본 동작과 동일, 명시용)");
     println!("  --sample <name>: toy/samples/<name>.rs 실행");
+    println!("  --trace: lex→lowering(before)→expand(after) 단계별 출력");
     println!("  passes (stub): lex -> parse -> ast_lower -> hir -> done");
     let names = sample_names();
     if names.is_empty() {
@@ -84,6 +85,7 @@ fn print_error_chain(top: &str, err: &dyn std::error::Error) {
 fn run(args: &[String]) -> i32 {
     let mut lex_only = false;
     let mut ast_only = false;
+    let mut trace = false;
     let mut sample: Option<String> = None;
     let mut path: Option<&String> = None;
     let mut i = 1;
@@ -93,6 +95,8 @@ fn run(args: &[String]) -> i32 {
             lex_only = true;
         } else if arg == "--ast" {
             ast_only = true;
+        } else if arg == "--trace" {
+            trace = true;
         } else if arg == "--sample" {
             i += 1;
             match args.get(i) {
@@ -164,8 +168,18 @@ fn run(args: &[String]) -> i32 {
         }
         return EXIT_SUCCESS;
     }
+    if trace {
+        println!("== lex ({} tokens) ==", tokens.len());
+        for tok in &tokens {
+            let text = tok.span.try_snippet(&src).unwrap_or("<invalid>");
+            println!("{:?} [{}..{}] {:?}", tok.kind, tok.span.lo, tok.span.hi, text);
+        }
+    }
     match rtoy_tokenstream_lowering::try_lower(&tokens, &src) {
         Ok(krate) => {
+            if trace {
+                println!("== lowering (before expand) ==\n{krate:#?}");
+            }
             let krate = match rtoy_expand::expand_crate(krate) {
                 Ok(k) => k,
                 Err(e) => {
@@ -173,6 +187,9 @@ fn run(args: &[String]) -> i32 {
                     return EXIT_FAILURE;
                 }
             };
+            if trace {
+                println!("== expand (after expand) ==\n{krate:#?}");
+            }
             if let Err(errs) = rtoy_resolve::resolve(&krate, &src) {
                 for e in &errs {
                     print_resolve_error(src_path, &src, e);
