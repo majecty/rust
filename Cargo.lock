@@ -3540,6 +3540,7 @@ name = "rtoy-resolve"
 version = "0.0.1"
 dependencies = [
  "rtoy-ast",
+ "rtoy-expand",
  "rtoy-lexer",
  "rtoy-span",
  "rtoy-tokenstream-lowering",
