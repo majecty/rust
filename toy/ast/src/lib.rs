@@ -31,6 +31,8 @@ pub struct Item {
 #[derive(Debug, Clone, PartialEq)]
 pub enum ItemKind {
     Fn(FnItem),
+    /// `def_fn!(foo)` — 아이템 위치 매크로 호출 (expand 전).
+    Macro { name: Ident, args: Vec<Expr> },
     // TODO: picks: Struct/Const/Mod
 }
 

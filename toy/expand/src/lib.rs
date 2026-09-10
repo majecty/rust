@@ -107,27 +107,60 @@ pub fn expand_expr(e: rtoy_ast::Expr) -> Result<rtoy_ast::Expr, ExpandError> {
     Ok(Expr { kind, span })
 }
 
-/// Crate 전체의 `twice!`를 전개한다.
-pub fn expand_crate(mut krate: rtoy_ast::Crate) -> Result<rtoy_ast::Crate, ExpandError> {
-    for item in &mut krate.items {
-        let rtoy_ast::ItemKind::Fn(f) = &mut item.kind;
-        let mut stmts = std::mem::take(&mut f.body.stmts);
-        for s in &mut stmts {
-            match &mut s.kind {
-                rtoy_ast::StmtKind::Expr(e) => *e = expand_expr(std::mem::replace(e, dummy_expr()))?,
-                rtoy_ast::StmtKind::Let(l) => {
-                    if let Some(init) = l.init.take() {
-                        l.init = Some(expand_expr(init)?);
+/// 아이템 매크로 전개. `def_fn!(foo)` -> `fn foo(){}` (빈 몸, 이름 span=인자 span).
+/// fn 몸 안의 `twice!`는 그대로 재귀 전개한다.
+pub fn expand_item(item: rtoy_ast::Item) -> Result<rtoy_ast::Item, ExpandError> {
+    use rtoy_ast::{Block, FnItem, Item, ItemKind};
+    match item.kind {
+        ItemKind::Macro { name, args } if name.name == "def_fn" => {
+            if args.len() != 1 {
+                return Err(ExpandError { mac: name.name, expected: "1 arg (fn name)".into(), got: args.len(), source: None });
+            }
+            let mut it = args.into_iter().map(expand_expr);
+            let arg = it.next().expect("checked len")?;
+            let rtoy_ast::ExprKind::Var(fn_name) = arg.kind else {
+                return Err(ExpandError { mac: "def_fn".into(), expected: "ident (e.g. def_fn!(foo))".into(), got: 1, source: None });
+            };
+            let span = item.span;
+            let empty = Block { stmts: vec![], tail: None, span };
+            Ok(Item { name: fn_name, kind: ItemKind::Fn(FnItem { body: empty, span }), span })
+        }
+        ItemKind::Macro { name, args } => {
+            let n = args.len();
+            let mut out = Vec::with_capacity(n);
+            for a in args {
+                out.push(expand_expr(a)?);
+            }
+            Ok(Item { name: item.name, kind: ItemKind::Macro { name, args: out }, span: item.span })
+        }
+        ItemKind::Fn(mut f) => {
+            let mut stmts = std::mem::take(&mut f.body.stmts);
+            for s in &mut stmts {
+                match &mut s.kind {
+                    rtoy_ast::StmtKind::Expr(e) => *e = expand_expr(std::mem::replace(e, dummy_expr()))?,
+                    rtoy_ast::StmtKind::Let(l) => {
+                        if let Some(init) = l.init.take() {
+                            l.init = Some(expand_expr(init)?);
+                        }
                     }
                 }
             }
-        }
-        f.body.stmts = stmts;
-        if let Some(t) = f.body.tail.take() {
-            f.body.tail = Some(expand_expr(t)?);
+            f.body.stmts = stmts;
+            if let Some(t) = f.body.tail.take() {
+                f.body.tail = Some(expand_expr(t)?);
+            }
+            Ok(rtoy_ast::Item { name: item.name, kind: ItemKind::Fn(f), span: item.span })
         }
     }
-    Ok(krate)
+}
+
+/// Crate 전체의 `twice!`/`def_fn!`를 전개한다.
+pub fn expand_crate(krate: rtoy_ast::Crate) -> Result<rtoy_ast::Crate, ExpandError> {
+    let mut items = Vec::with_capacity(krate.items.len());
+    for item in krate.items {
+        items.push(expand_item(item)?);
+    }
+    Ok(rtoy_ast::Crate { items, span: krate.span })
 }
 
 fn dummy_expr() -> rtoy_ast::Expr {
@@ -174,5 +207,24 @@ mod tests {
     fn unknown_macro_reports_cause() {
         let e = expand("nope", vec![], Span::root(0, 1)).unwrap_err();
         assert!(e.to_string().contains("nope"));
+    }
+
+    #[test]
+    fn def_fn_creates_empty_fn() {
+        use rtoy_ast::{Expr, ExprKind, Ident, Item, ItemKind};
+        let call = Span::root(0, 12);
+        let arg_span = Span::root(7, 10);
+        let item = Item {
+            name: Ident { name: "def_fn".into(), span: Span::root(0, 6) },
+            kind: ItemKind::Macro {
+                name: Ident { name: "def_fn".into(), span: Span::root(0, 6) },
+                args: vec![Expr { kind: ExprKind::Var(Ident { name: "foo".into(), span: arg_span }), span: arg_span }],
+            },
+            span: call,
+        };
+        let out = expand_item(item).unwrap();
+        assert_eq!(out.name.name, "foo");
+        assert_eq!(out.name.span, arg_span);
+        assert!(matches!(out.kind, ItemKind::Fn(f) if f.body.stmts.is_empty() && f.body.tail.is_none()));
     }
 }

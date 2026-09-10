@@ -45,6 +45,10 @@ pub fn resolve(krate: &Crate, src: &str) -> Result<(), Vec<ResolveError>> {
     let mut seen: Vec<(&str, Span)> = Vec::new();
     let mut errs = Vec::new();
     for item in &krate.items {
+        // 미전개 매크로는 이름 비교에서 제외 (expand 후에는 남지 않음).
+        if matches!(item.kind, rtoy_ast::ItemKind::Macro { .. }) {
+            continue;
+        }
         if let Some((_, first_span)) = seen.iter().find(|(n, _)| *n == item.name.name) {
             errs.push(ResolveError {
                 context: "resolve",
@@ -92,5 +96,23 @@ mod tests {
         let msg = errs[0].to_string();
         assert!(msg.contains("duplicate definition of `main`"), "{msg}");
         assert!(msg.contains("[19..23]"), "{msg}");
+    }
+
+    #[test]
+    fn def_fn_and_explicit_fn_duplicate() {
+        // 고민용: 매크로 생성 foo(span=호출 속 foo) vs 직접 정의 foo.
+        let src = "def_fn!(foo) fn foo() { 1 }";
+        let krate = try_lower(&tokenize(src), src).unwrap();
+        let krate = rtoy_expand::expand_crate(krate).unwrap();
+        assert_eq!(krate.items.len(), 2);
+        let errs = resolve(&krate, src).unwrap_err();
+        assert_eq!(errs.len(), 1);
+        assert_eq!(errs[0].name, "foo");
+        // 둘 다 원문 "foo"를 가리키지만 위치가 다름: 호출 속 이름 vs fn 이름.
+        assert_eq!(errs[0].first_span.snippet(src), "foo");
+        assert_eq!(errs[0].span.snippet(src), "foo");
+        assert!(errs[0].span.lo > errs[0].first_span.lo);
+        let msg = errs[0].to_string();
+        assert!(msg.contains("duplicate definition of `foo`"), "{msg}");
     }
 }

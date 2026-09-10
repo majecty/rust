@@ -10,3 +10,4 @@ rtoy-span = { path = "../span" }
 [dev-dependencies]
 rtoy-lexer = { path = "../lexer" }
 rtoy-tokenstream-lowering = { path = "../tokenstream-lowering" }
+rtoy-expand = { path = "../expand" }

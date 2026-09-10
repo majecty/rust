@@ -21,10 +21,10 @@
 - span: `Span{lo,hi,ctxt,parent}` + `SyntaxContext/ExpnId/ExpnData` + `root/copied_arg/fresh_child/chain/same_var` + 테스트 5개
 - lexer: char_indices tokenize + `Comment`(`//`~개행전) + 테스트 1개 (`lexer→ast` 역전 해소)
 - ast: Crate/Item/Fn/Block/Stmt(`Expr`/`Let`)/`LetStmt{name,ty,init}`/Expr(`Int`/`Var`/`Call`/`Macro`)/이항연산 + 테스트 1개
-- expand: `lift/expand(twice/my_let)` + `expand_expr/expand_crate(twice!(x)->x+x)` + 테스트 3개
-- samples: `twice.rs` (`let y=1; twice!(y)` → tail `Binary(Add)`) · driver `--trace` 한 줄 요약
-- lowering: `fn name() { stmt* tail? }` pull 파서 + 테스트 4개 (`let`·빈몸·`skip_trivia`·이항연산 우선순위·Var/Call)
-- resolve: 중복 fn 이름 검사 + 테스트 2개
+- expand: `lift/expand(twice/my_let)` + `expand_expr/expand_item/expand_crate(twice!/def_fn!)` + 테스트 4개
+- samples: `twice.rs` · `dup-fn-macro.rs` (`def_fn!(foo)+fn foo` 중복 재현) · driver `--trace` 한 줄 요약
+- lowering: `fn name() { stmt* tail? }` + 아이템 매크로 `def_fn!(foo)` pull 파서 + 테스트 5개
+- resolve: 중복 fn 검사(미전개 Macro 제외) + 매크로/직접정의 중복 통합테스트 + 테스트 3개
 - driver: lex → lowering → expand → resolve → AST 출력 (`--sample twice` 통과, trace시 최종 덤프 생략)
 - 테스트 총 16개 통과 (span 5/expand 3/ast 1/lexer 1/lowering 4/resolve 2) · 커밋 `60f46d5` `994c6af` `84eebf4`
 - Span: lexer→span→ast→lowering 배선 완료
@@ -49,7 +49,9 @@
 - [x] Expand: `twice!(x)->x+x` + `Macro` 노드 + driver 배선 + `samples/twice.rs`
 - [x] Driver: `--trace` 단계별 한 줄 요약 (lex/before/after/final)
 - [ ] Span 배선: 전개 생성토큰에 `parent/ctxt` 연결 (`chain` 역추적·`same_var` 위생)
+- [x] Expand: `def_fn!(foo)->fn foo(){}` 아이템 매크로 + `expand_item` (중복 에러문구 고민용)
 - [ ] Expand: `my_let!` AST 전개 + 위생 테스트
+- [ ] Resolve 진단: 매크로 생성 이름의 `expanded from def_fn! here` note + snippet이 호출문 전체를 보여줄지 결정
 - [ ] Span/docs: `docs/status.md` 7-crate 동기화
 - [ ] HIR 스텁: AST → 간단 HIR ([상세](docs/roadmap.md))
 - [ ] 위키 정리: 단계마다 `[[rust-*]]` 페이지

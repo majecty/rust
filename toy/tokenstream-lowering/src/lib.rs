@@ -64,12 +64,60 @@ impl<'a> Lowering<'a> {
         Ok(Crate { items, span: Span::root(start, end) })
     }
 
-    /// 아이템 하나. 예: `fn main() { 42 }`.
+    /// 아이템 하나. 예: `fn main() { 42 }`, `def_fn!(foo)`.
     fn parse_item(&mut self) -> Result<Item, LowerError> {
+        if self.is_macro_item() {
+            return self.parse_macro_item();
+        }
         let (fn_tok, name) = self.parse_fn_head()?;
         let body = self.parse_block()?;
         let span = Span::root(fn_tok.span.lo, body.span.hi);
         Ok(Item { name, kind: ItemKind::Fn(FnItem { body, span }), span })
+    }
+
+    /// `def_fn!(foo)`처럼 아이템 위치 매크로 호출인지 미리보기 (소비 없음).
+    fn is_macro_item(&self) -> bool {
+        let mut idx = self.pos;
+        while let Some(t) = self.tokens.get(idx) {
+            if matches!(t.kind, TokenKind::Whitespace | TokenKind::Comment) {
+                idx += 1;
+                continue;
+            }
+            break;
+        }
+        let Some(name_tok) = self.tokens.get(idx) else { return false; };
+        if name_tok.kind != TokenKind::Ident {
+            return false;
+        }
+        idx += 1;
+        while let Some(t) = self.tokens.get(idx) {
+            if matches!(t.kind, TokenKind::Whitespace | TokenKind::Comment) {
+                idx += 1;
+                continue;
+            }
+            break;
+        }
+        matches!(self.tokens.get(idx), Some(t) if t.kind == TokenKind::Punct && t.span.try_snippet(self.src).as_deref() == Ok("!"))
+    }
+
+    /// 아이템 매크로. 예: `def_fn!(foo)` — 뒤 `;`는 있어도 없어도 된다.
+    fn parse_macro_item(&mut self) -> Result<Item, LowerError> {
+        self.skip_trivia();
+        let name_tok = self.expect("item macro name", TokenKind::Ident, "macro name")?;
+        let name = self.peek_text(&name_tok).map_err(|e| LowerError { context: "item macro name", expected: "valid macro name".into(), found: Some((name_tok.kind, "<invalid span>".into(), name_tok.span)), pos: self.pos, source: Some(e) })?;
+        let ident = Ident { name, span: name_tok.span };
+        self.skip_trivia();
+        self.expect_punct("item macro bang", '!')?;
+        self.skip_trivia();
+        self.expect_punct("item macro args", '(')?;
+        let (args, end) = self.parse_call_args()?;
+        let mut hi = end;
+        self.skip_trivia();
+        if self.peek_is_punct(';') {
+            hi = self.bump().expect("peeked `;`").span.hi;
+        }
+        let span = Span::root(name_tok.span.lo, hi);
+        Ok(Item { name: ident.clone(), kind: ItemKind::Macro { name: ident, args }, span })
     }
 
     /// fn 헤더. 예: `fn main()`.
@@ -372,6 +420,7 @@ mod tests {
                 ExprKind::Int(42) => {}
                 other => panic!("expected Int(42), got {other:?}"),
             },
+            other => panic!("expected Fn, got {other:?}"),
         }
     }
 
@@ -393,6 +442,7 @@ mod tests {
                     other => panic!("expected add, got {other:?}"),
                 }
             }
+            other => panic!("expected Fn, got {other:?}"),
         }
     }
 
@@ -417,6 +467,7 @@ mod tests {
                     other => panic!("expected call, got {other:?}"),
                 }
             }
+            other => panic!("expected Fn, got {other:?}"),
         }
     }
 
@@ -445,6 +496,24 @@ mod tests {
                 assert_eq!(stmt.span.snippet(src), "let x: u32 = 42");
                 assert_eq!(stmt.init.as_ref().unwrap().span.snippet(src), "42");
             }
+            other => panic!("expected Fn, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn lowers_def_fn_item() {
+        let src = "def_fn!(foo)";
+        let toks = tokenize(src);
+        let krate = lower(&toks, src);
+        assert_eq!(krate.items.len(), 1);
+        assert_eq!(krate.items[0].span.snippet(src), src);
+        match &krate.items[0].kind {
+            ItemKind::Macro { name, args } => {
+                assert_eq!(name.name, "def_fn");
+                assert_eq!(args.len(), 1);
+                assert_eq!(args[0].span.snippet(src), "foo");
+            }
+            other => panic!("expected item macro, got {other:?}"),
         }
     }
 }
