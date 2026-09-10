@@ -82,6 +82,41 @@ fn print_error_chain(top: &str, err: &dyn std::error::Error) {
     }
 }
 
+/// trace용 한 줄 요약. 장황한 {:#?} 대신 snippet+span만 노출한다.
+fn short_span(s: &rtoy_span::Span) -> String {
+    format!("[{}..{}]", s.lo, s.hi)
+}
+
+fn expr_sum(e: &rtoy_ast::Expr, src: &str) -> String {
+    let snip = e.span.try_snippet(src).unwrap_or("<invalid>");
+    let kind = match &e.kind {
+        rtoy_ast::ExprKind::Int(n) => format!("Int({n})"),
+        rtoy_ast::ExprKind::Var(v) => format!("Var({})", v.name),
+        rtoy_ast::ExprKind::Call { callee, args } => format!("Call({}/{})", callee.name, args.len()),
+        rtoy_ast::ExprKind::Binary { op, .. } => format!("Binary({op:?})"),
+        rtoy_ast::ExprKind::Macro { name, args } => format!("Macro({}!/{})", name.name, args.len()),
+    };
+    format!("{kind} {snip:?} {}", short_span(&e.span))
+}
+
+fn trace_crate(label: &str, krate: &rtoy_ast::Crate, src: &str) {
+    println!("== {label} ==");
+    for item in &krate.items {
+        println!("fn {} {}", item.name.name, short_span(&item.span));
+        let rtoy_ast::ItemKind::Fn(f) = &item.kind;
+        for s in &f.body.stmts {
+            match &s.kind {
+                rtoy_ast::StmtKind::Let(l) => println!("  let {} = {} {}", l.name.name, l.init.as_ref().map(|e| expr_sum(e, src)).unwrap_or("-".into()), short_span(&s.span)),
+                rtoy_ast::StmtKind::Expr(e) => println!("  expr {} {}", expr_sum(e, src), short_span(&s.span)),
+            }
+        }
+        match &f.body.tail {
+            Some(t) => println!("  tail {}", expr_sum(t, src)),
+            None => println!("  tail -")
+        }
+    }
+}
+
 fn run(args: &[String]) -> i32 {
     let mut lex_only = false;
     let mut ast_only = false;
@@ -178,7 +213,7 @@ fn run(args: &[String]) -> i32 {
     match rtoy_tokenstream_lowering::try_lower(&tokens, &src) {
         Ok(krate) => {
             if trace {
-                println!("== lowering (before expand) ==\n{krate:#?}");
+                trace_crate("lowering (before expand)", &krate, &src);
             }
             let krate = match rtoy_expand::expand_crate(krate) {
                 Ok(k) => k,
@@ -188,7 +223,7 @@ fn run(args: &[String]) -> i32 {
                 }
             };
             if trace {
-                println!("== expand (after expand) ==\n{krate:#?}");
+                trace_crate("expand (after expand)", &krate, &src);
             }
             if let Err(errs) = rtoy_resolve::resolve(&krate, &src) {
                 for e in &errs {
@@ -196,7 +231,11 @@ fn run(args: &[String]) -> i32 {
                 }
                 return EXIT_FAILURE;
             }
-            println!("ast: {:#?}", krate);
+            if trace {
+                trace_crate("final", &krate, &src);
+            } else {
+                println!("ast: {:#?}", krate);
+            }
             // TODO: parser -> ast_lowering (stub for now)
             EXIT_SUCCESS
         }
