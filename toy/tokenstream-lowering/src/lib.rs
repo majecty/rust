@@ -21,7 +21,7 @@ impl std::fmt::Display for LowerError {
             Some((kind, text, span)) => write!(
                 f,
                 "{}: expected {} but found {:?} {:?} at span [{}..{}] (token #{})",
-                self.context, self.expected, kind, text, span.start, span.end, self.pos
+                self.context, self.expected, kind, text, span.lo, span.hi, self.pos
             ),
             None => write!(f, "{}: expected {} but found end of input (token #{})", self.context, self.expected, self.pos),
         }
@@ -54,21 +54,21 @@ impl<'a> Lowering<'a> {
     pub fn try_parse_crate(&mut self) -> Result<Crate, LowerError> {
         let mut items = Vec::new();
         self.skip_whitespace();
-        let start = self.peek().map(|t| t.span.start).unwrap_or(0);
+        let start = self.peek().map(|t| t.span.lo).unwrap_or(0);
         loop {
             self.skip_whitespace();
             if self.peek().is_none() { break; }
             items.push(self.parse_item()?);
         }
-        let end = items.last().map(|i| i.span.end).unwrap_or(start);
-        Ok(Crate { items, span: Span::new(start, end) })
+        let end = items.last().map(|i| i.span.hi).unwrap_or(start);
+        Ok(Crate { items, span: Span::root(start, end) })
     }
 
     /// 아이템 하나. 예: `fn main() { 42 }`.
     fn parse_item(&mut self) -> Result<Item, LowerError> {
         let (fn_tok, name) = self.parse_fn_head()?;
         let body = self.parse_block()?;
-        let span = Span::new(fn_tok.span.start, body.span.end);
+        let span = Span::root(fn_tok.span.lo, body.span.hi);
         Ok(Item { name, kind: ItemKind::Fn(FnItem { body, span }), span })
     }
 
@@ -94,14 +94,14 @@ impl<'a> Lowering<'a> {
             self.skip_trivia();
             if self.peek_is_punct('}') {
                 let close = self.bump().expect("peeked `}`");
-                let span = Span::new(open.span.start, close.span.end);
+                let span = Span::root(open.span.lo, close.span.hi);
                 return Ok(Block { stmts, tail, span });
             }
             if self.peek_is_ident("let") {
                 let let_tok = self.peek().copied();
                 let stmt = self.parse_let_stmt()?;
                 let semi = self.expect_punct("let semi", ';')?;
-                let span = Span::new(let_tok.map(|t| t.span.start).unwrap_or(stmt.span.start), semi.span.end);
+                let span = Span::root(let_tok.map(|t| t.span.lo).unwrap_or(stmt.span.lo), semi.span.hi);
                 stmts.push(Stmt { kind: StmtKind::Let(stmt), span });
                 continue;
             }
@@ -109,7 +109,7 @@ impl<'a> Lowering<'a> {
             self.skip_trivia();
             if self.peek_is_punct(';') {
                 let semi = self.bump().expect("peeked `;`");
-                let span = Span::new(expr.span.start, semi.span.end);
+                let span = Span::root(expr.span.lo, semi.span.hi);
                 stmts.push(Stmt { kind: StmtKind::Expr(expr), span });
             } else {
                 tail = Some(expr);
@@ -133,7 +133,7 @@ impl<'a> Lowering<'a> {
         }
         self.expect_punct("let eq", '=')?;
         let init = self.parse_expr()?;
-        let span = Span::new(let_tok.span.start, init.span.end);
+        let span = Span::root(let_tok.span.lo, init.span.hi);
         Ok(LetStmt { name, ty, init: Some(init), span })
     }
 
@@ -169,7 +169,7 @@ impl<'a> Lowering<'a> {
     }
 
     fn join_binary(&self, op: BinOp, lhs: Expr, rhs: Expr) -> Expr {
-        let span = Span::new(lhs.span.start, rhs.span.end);
+        let span = Span::root(lhs.span.lo, rhs.span.hi);
         Expr { kind: ExprKind::Binary { op, lhs: Box::new(lhs), rhs: Box::new(rhs) }, span }
     }
 
@@ -224,8 +224,16 @@ impl<'a> Lowering<'a> {
         if self.peek_is_punct('(') {
             self.bump();
             let (args, end) = self.parse_call_args()?;
-            let span = Span::new(t.span.start, end);
+            let span = Span::root(t.span.lo, end);
             return Ok(Expr { kind: ExprKind::Call { callee: ident, args }, span });
+        }
+        if self.peek_is_punct('!') {
+            self.bump();
+            self.skip_trivia();
+            self.expect_punct("macro args", '(')?;
+            let (args, end) = self.parse_call_args()?;
+            let span = Span::root(t.span.lo, end);
+            return Ok(Expr { kind: ExprKind::Macro { name: ident, args }, span });
         }
         self.pos = save;
         Ok(Expr { kind: ExprKind::Var(ident), span: t.span })
@@ -238,7 +246,7 @@ impl<'a> Lowering<'a> {
             self.skip_trivia();
             if self.peek_is_punct(')') {
                 let close = self.bump().expect("peeked `)`");
-                return Ok((args, close.span.end));
+                return Ok((args, close.span.hi));
             }
             args.push(self.parse_expr()?);
             self.skip_trivia();
@@ -247,7 +255,7 @@ impl<'a> Lowering<'a> {
                 continue;
             }
             let close = self.expect_punct("call args", ')')?;
-            return Ok((args, close.span.end));
+            return Ok((args, close.span.hi));
         }
     }
 

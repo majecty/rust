@@ -24,8 +24,8 @@ impl std::fmt::Display for ResolveError {
         write!(
             f,
             "{}: duplicate definition of `{}` (first: {:?} at [{}..{}], duplicate: {:?} at [{}..{}])",
-            self.context, self.name, self.first_snippet, self.first_span.start, self.first_span.end,
-            self.snippet, self.span.start, self.span.end
+            self.context, self.name, self.first_snippet, self.first_span.lo, self.first_span.hi,
+            self.snippet, self.span.lo, self.span.hi
         )
     }
 }
@@ -88,7 +88,7 @@ mod tests {
         assert_eq!(errs[0].name, "main");
         assert_eq!(errs[0].span.snippet(src), "main");
         assert_eq!(errs[0].first_span.snippet(src), "main");
-        assert!(errs[0].span.start > errs[0].first_span.start);
+        assert!(errs[0].span.lo > errs[0].first_span.lo);
         let msg = errs[0].to_string();
         assert!(msg.contains("duplicate definition of `main`"), "{msg}");
         assert!(msg.contains("[19..23]"), "{msg}");

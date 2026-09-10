@@ -1,35 +1,100 @@
-//! rtoy span — 최소 위치 정보.
-//! Original: compiler/rustc_span (SpanData/Span 간소형).
+//! rtoy span — 계층 위치 정보 (breaking).
+//! Original: compiler/rustc_span (SpanData 간소형). 호환심 없음.
 
-/// rustc_span 대비: 일단 start/end만.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Span {
-    pub start: usize,
-    pub end: usize,
+    pub lo: usize,
+    pub hi: usize,
+    pub ctxt: SyntaxContext,
+    pub parent: Option<ExpnId>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct SyntaxContext(pub u32);
+
+impl SyntaxContext {
+    pub fn root() -> Self {
+        Self(0)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ExpnId(pub u32);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ExpnData {
+    pub call_site: Span,
+    pub parent_span: Span,
+}
+
+fn expn_store() -> &'static std::sync::Mutex<Vec<ExpnData>> {
+    static STORE: std::sync::OnceLock<std::sync::Mutex<Vec<ExpnData>>> = std::sync::OnceLock::new();
+    STORE.get_or_init(|| std::sync::Mutex::new(Vec::new()))
+}
+
+fn ctxt_counter() -> &'static std::sync::Mutex<u32> {
+    static CTR: std::sync::OnceLock<std::sync::Mutex<u32>> = std::sync::OnceLock::new();
+    CTR.get_or_init(|| std::sync::Mutex::new(1))
+}
+
+fn fresh_ctxt() -> SyntaxContext {
+    let mut n = ctxt_counter().lock().unwrap_or_else(|e| panic!("ctxt counter poisoned: {e}"));
+    let c = *n;
+    *n = n.checked_add(1).expect("ctxt overflow");
+    SyntaxContext(c)
+}
+
+fn intern_expansion(call_site: Span, parent_span: Span) -> ExpnId {
+    let mut v = expn_store().lock().unwrap_or_else(|e| panic!("expn store poisoned: {e}"));
+    let id = ExpnId(v.len() as u32);
+    v.push(ExpnData { call_site, parent_span });
+    id
 }
 
 impl Span {
-    pub fn new(start: usize, end: usize) -> Self {
-        Self { start, end }
+    pub fn new(lo: usize, hi: usize, ctxt: SyntaxContext, parent: Option<ExpnId>) -> Self {
+        Self { lo, hi, ctxt, parent }
     }
-    pub fn dummy() -> Self {
-        Self { start: 0, end: 0 }
+    pub fn root(lo: usize, hi: usize) -> Self {
+        Self::new(lo, hi, SyntaxContext::root(), None)
     }
-    /// src에서 해당 구간 스니펫 반환. 실패 시 가장 안쪽 값까지 담은 에러.
+    pub fn with_ctxt(mut self, ctxt: SyntaxContext) -> Self {
+        self.ctxt = ctxt;
+        self
+    }
+    pub fn expanded_from(call_site: Span, arg: Span) -> ExpnId {
+        intern_expansion(call_site, arg)
+    }
+    pub fn fresh_child(&self, call_site: Span) -> Self {
+        Self { lo: self.lo, hi: self.hi, ctxt: fresh_ctxt(), parent: Some(intern_expansion(call_site, *self)) }
+    }
+    pub fn copied_arg(arg: Span, call_site: Span) -> Self {
+        Self { lo: arg.lo, hi: arg.hi, ctxt: arg.ctxt, parent: Some(intern_expansion(call_site, arg)) }
+    }
+    pub fn expansion(&self) -> Option<ExpnData> {
+        self.parent.map(|id| expn_store().lock().unwrap_or_else(|e| panic!("expn store poisoned: {e}"))[id.0 as usize])
+    }
+    pub fn chain(&self) -> String {
+        let mut out = format!("[{}..{}@c{}]", self.lo, self.hi, self.ctxt.0);
+        let mut cur = *self;
+        while let Some(d) = cur.expansion() {
+            out.push_str(&format!(" <- call[{}..{}]", d.call_site.lo, d.call_site.hi));
+            cur = d.parent_span;
+        }
+        out
+    }
     pub fn try_snippet<'a>(&self, src: &'a str) -> Result<&'a str, SpanError> {
         let len = src.len();
-        if self.start > self.end || self.end > len {
-            return Err(SpanError { start: self.start, end: self.end, len, reason: SpanErrorKind::OutOfRange });
+        if self.lo > self.hi || self.hi > len {
+            return Err(SpanError { lo: self.lo, hi: self.hi, len, reason: SpanErrorKind::OutOfRange });
         }
-        src.get(self.start..self.end).ok_or(SpanError { start: self.start, end: self.end, len, reason: SpanErrorKind::NotCharBoundary })
+        src.get(self.lo..self.hi).ok_or(SpanError { lo: self.lo, hi: self.hi, len, reason: SpanErrorKind::NotCharBoundary })
     }
-    /// src에서 해당 구간 스니펫 반환.
     pub fn snippet<'a>(&self, src: &'a str) -> &'a str {
         self.try_snippet(src).unwrap_or_else(|e| panic!("span snippet failed: {e} (src_len={})", src.len()))
     }
 }
 
-/// span이 src를 벗어난 이유. 가장 안쪽 정보까지 Display에 노출한다.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SpanErrorKind {
     OutOfRange,
@@ -38,8 +103,8 @@ pub enum SpanErrorKind {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SpanError {
-    pub start: usize,
-    pub end: usize,
+    pub lo: usize,
+    pub hi: usize,
     pub len: usize,
     pub reason: SpanErrorKind,
 }
@@ -50,14 +115,12 @@ impl std::fmt::Display for SpanError {
             SpanErrorKind::OutOfRange => "range out of bounds",
             SpanErrorKind::NotCharBoundary => "not a char boundary",
         };
-        write!(f, "span [{}..{}] invalid for src len {}: {why}", self.start, self.end, self.len)
+        write!(f, "span [{}..{}] invalid for src len {}: {why}", self.lo, self.hi, self.len)
     }
 }
 
 impl std::error::Error for SpanError {}
 
-/// byte offset → 1-based (line, col). col은 해당 줄 내 char 수 기준.
-/// 범위 밖이면 None (가장 안쪽 원인을 호출자가 문구로 노출).
 pub fn offset_to_line_col(src: &str, offset: usize) -> Option<(usize, usize)> {
     if offset > src.len() || !src.is_char_boundary(offset) {
         return None;
@@ -77,7 +140,6 @@ pub fn offset_to_line_col(src: &str, offset: usize) -> Option<(usize, usize)> {
     Some((line, col))
 }
 
-/// 1-based line 번호의 원문 한 줄 (개행 제외) + 줄 시작 offset.
 pub fn line_text(src: &str, line: usize) -> Option<(&str, usize)> {
     if line == 0 {
         return None;
@@ -99,30 +161,32 @@ pub fn line_text(src: &str, line: usize) -> Option<(&str, usize)> {
     None
 }
 
-/// 한 줄 스니펫 + 캐럿 본문. span이 여러 줄이면 첫 줄만 `^^^`로 표시.
-/// 반환값: (line, 원문 한 줄, 캐럿 본문). 캐럿 본문은 접두사 없이
-/// " "*rel_start + "^"*width — 접두사 폭은 caller가 줄번호 렌더링과 맞춘다.
 pub fn caret_line(src: &str, span: Span) -> Option<(usize, String, String)> {
-    let (line, _) = offset_to_line_col(src, span.start)?;
+    let (line, _) = offset_to_line_col(src, span.lo)?;
     let (text, line_start) = line_text(src, line)?;
-    if span.start < line_start || span.start > line_start + text.len() {
+    if span.lo < line_start || span.lo > line_start + text.len() {
         return None;
     }
-    let rel_start_bytes = span.start - line_start;
+    let rel_start_bytes = span.lo - line_start;
     let line_end = line_start + text.len();
-    let rel_end_bytes = span.end.min(line_end).saturating_sub(line_start).max(rel_start_bytes);
+    let rel_end_bytes = span.hi.min(line_end).saturating_sub(line_start).max(rel_start_bytes);
     if !text.is_char_boundary(rel_start_bytes) || !text.is_char_boundary(rel_end_bytes) {
         return None;
     }
     let rel_start = text[..rel_start_bytes].chars().count();
     let mut width = text[rel_start_bytes..rel_end_bytes].chars().count().max(1);
-    if span.end > line_end {
+    if span.hi > line_end {
         width = width.max(1);
     }
     let mut caret = String::new();
     caret.push_str(&" ".repeat(rel_start));
     caret.push_str(&"^".repeat(width));
     Some((line, text.to_string(), caret))
+}
+
+#[must_use]
+pub fn same_var(a: &str, a_ctxt: SyntaxContext, b: &str, b_ctxt: SyntaxContext) -> bool {
+    a == b && a_ctxt == b_ctxt
 }
 
 #[cfg(test)]
@@ -132,24 +196,43 @@ mod tests {
     #[test]
     fn snippet_roundtrip() {
         let src = "fn main() { 42 }";
-        assert_eq!(Span::new(0, 2).snippet(src), "fn");
-        assert_eq!(Span::dummy(), Span::new(0, 0));
+        assert_eq!(Span::root(0, 2).snippet(src), "fn");
+        assert_eq!(Span::root(0, 0), Span::new(0, 0, SyntaxContext::root(), None));
     }
 
     #[test]
     fn caret_has_no_prefix() {
         let src = "fn main() {}";
-        let (_, _, caret) = caret_line(src, Span::new(4, 8)).unwrap();
+        let (_, _, caret) = caret_line(src, Span::root(4, 8)).unwrap();
         assert_eq!(caret, "    ^^^^");
         assert!(!caret.contains("|"));
     }
 
     #[test]
+    fn expansion_keeps_parent_chain() {
+        let call = Span::root(0, 9);
+        let arg = Span::root(6, 7);
+        let lhs = Span::copied_arg(arg, call);
+        let plus = arg.fresh_child(call);
+        assert!(lhs.parent.is_some());
+        assert_eq!(lhs.ctxt, SyntaxContext::root());
+        assert_ne!(plus.ctxt, SyntaxContext::root());
+        assert!(plus.chain().contains("call[0..9]"));
+    }
+
+    #[test]
+    fn hygiene_separates_macro_tmp() {
+        let call = Span::root(10, 20);
+        let user_tmp = Span::root(0, 3);
+        let macro_tmp = user_tmp.fresh_child(call);
+        assert!(!same_var("tmp", user_tmp.ctxt, "tmp", macro_tmp.ctxt));
+    }
+
+    #[test]
     fn caret_multibyte_char_boundary() {
-        // 전각 1자가 span 앞에 있어도 자르기/개수 계산이 char 경계에서 안전
         let src = "fn 한글(x: i32) {}";
         let s = src.find("x:").unwrap();
-        let (_, _, caret) = caret_line(src, Span::new(s, s + 1)).unwrap();
+        let (_, _, caret) = caret_line(src, Span::root(s, s + 1)).unwrap();
         assert!(caret.trim_start().starts_with('^'));
     }
 }

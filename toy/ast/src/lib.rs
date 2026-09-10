@@ -91,12 +91,14 @@ pub enum ExprKind {
     /// `foo(a, b)` — callee는 함수 이름만, 인자는 식.
     Call { callee: Ident, args: Vec<Expr> },
     Binary { op: BinOp, lhs: Box<Expr>, rhs: Box<Expr> },
+    /// `twice!(y)` — 함수형 매크로 호출 (expand 전).
+    Macro { name: Ident, args: Vec<Expr> },
     // TODO: picks: Block
 }
 
 /// 빈 `fn main(){}` 더미 — driver 배선 확인용.
 pub fn dummy_crate() -> Crate {
-    let s = Span::dummy();
+    let s = Span::root(0, 0);
     Crate {
         span: s,
         items: vec![Item {

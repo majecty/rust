@@ -46,7 +46,7 @@ fn print_help() {
 
 /// rustc E0428 스타일 진단. 실패 시 가장 안쪽 원인까지 fallback으로 노출한다.
 fn print_resolve_error(file: &str, src: &str, e: &rtoy_resolve::ResolveError) {
-    let dup_loc = rtoy_span::offset_to_line_col(src, e.span.start);
+    let dup_loc = rtoy_span::offset_to_line_col(src, e.span.lo);
     let first_caret = rtoy_span::caret_line(src, e.first_span);
     let dup_caret = rtoy_span::caret_line(src, e.span);
     match (dup_loc, first_caret, dup_caret) {
@@ -155,7 +155,7 @@ fn run(args: &[String]) -> i32 {
     if lex_only {
         for tok in &tokens {
             match tok.span.try_snippet(&src) {
-                Ok(text) => println!("{:?} [{}..{}] {:?}", tok.kind, tok.span.start, tok.span.end, text),
+                Ok(text) => println!("{:?} [{}..{}] {:?}", tok.kind, tok.span.lo, tok.span.hi, text),
                 Err(span_err) => {
                     print_error_chain("lex snippet failed", &span_err);
                     return EXIT_FAILURE;
@@ -166,6 +166,13 @@ fn run(args: &[String]) -> i32 {
     }
     match rtoy_tokenstream_lowering::try_lower(&tokens, &src) {
         Ok(krate) => {
+            let krate = match rtoy_expand::expand_crate(krate) {
+                Ok(k) => k,
+                Err(e) => {
+                    print_error_chain("expand failed", &e);
+                    return EXIT_FAILURE;
+                }
+            };
             if let Err(errs) = rtoy_resolve::resolve(&krate, &src) {
                 for e in &errs {
                     print_resolve_error(src_path, &src, e);

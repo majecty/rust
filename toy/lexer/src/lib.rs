@@ -52,7 +52,7 @@ pub fn tokenize(src: &str) -> Vec<Token> {
             TokenKind::Punct
         };
         let end = chars.get(i).map(|(p, _)| *p).unwrap_or(src.len());
-        tokens.push(Token { kind, span: Span::new(start, end) });
+        tokens.push(Token { kind, span: Span::root(start, end) });
     }
     tokens
 }
