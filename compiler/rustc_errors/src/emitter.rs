@@ -223,12 +223,14 @@ pub trait Emitter {
         children: &mut Vec<Subdiag>,
         backtrace: bool,
     ) {
+        eprintln!("[rustc-backtrace] render_multispans backtrace={} primary={:?} children={}", backtrace, span.primary_spans(), children.len());
         for span in iter::once(span).chain(children.iter_mut().map(|child| &mut child.span)) {
             self.render_multispan_macro_backtrace(span, backtrace);
         }
     }
 
     fn render_multispan_macro_backtrace(&self, span: &mut MultiSpan, always_backtrace: bool) {
+        eprintln!("[rustc-backtrace] render_one always_backtrace={} primary={:?}", always_backtrace, span.primary_spans());
         let mut new_labels = FxIndexSet::default();
 
         for &sp in span.primary_spans() {
@@ -240,7 +242,9 @@ pub trait Emitter {
             // entries we don't want to print, to make sure the indices being
             // printed are contiguous (or omitted if there's only one entry).
             let macro_backtrace: Vec<_> = sp.macro_backtrace().collect();
+            eprintln!("[rustc-backtrace] sp={:?} depth={}", sp, macro_backtrace.len());
             for (i, trace) in macro_backtrace.iter().rev().enumerate() {
+                eprintln!("[rustc-backtrace] level={} call_site={:?} def_site={:?} kind={:?}", i, trace.call_site, trace.def_site, trace.kind.descr());
                 if trace.def_site.is_dummy() {
                     continue;
                 }

@@ -122,8 +122,9 @@ pub fn expand_item(item: rtoy_ast::Item) -> Result<rtoy_ast::Item, ExpandError> 
                 return Err(ExpandError { mac: "def_fn".into(), expected: "ident (e.g. def_fn!(foo))".into(), got: 1, source: None });
             };
             let span = item.span;
+            let name = rtoy_ast::Ident { name: fn_name.name, span: rtoy_span::Span::copied_arg(fn_name.span, item.span) };
             let empty = Block { stmts: vec![], tail: None, span };
-            Ok(Item { name: fn_name, kind: ItemKind::Fn(FnItem { body: empty, span }), span })
+            Ok(Item { name, kind: ItemKind::Fn(FnItem { body: empty, span }), span })
         }
         ItemKind::Macro { name, args } => {
             let n = args.len();

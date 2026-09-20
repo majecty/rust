@@ -4,7 +4,10 @@ pub fn trace_crate(label: &str, krate: &rtoy_ast::Crate, src: &str) {
     println!("== {label} ==");
     for item in &krate.items {
         println!("fn {} {}", item.name.name, short_span(&item.span));
-        let rtoy_ast::ItemKind::Fn(f) = &item.kind;
+        let rtoy_ast::ItemKind::Fn(f) = &item.kind else {
+            println!("  <unexpanded macro>");
+            continue;
+        };
         for s in &f.body.stmts {
             match &s.kind {
                 rtoy_ast::StmtKind::Let(l) => println!(

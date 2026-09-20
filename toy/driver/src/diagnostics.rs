@@ -2,6 +2,8 @@
 
 /// rustc E0428 스타일 진단. 실패 시 가장 안쪽 원인까지 fallback으로 노출한다.
 pub fn print_resolve_error(file: &str, src: &str, e: &rtoy_resolve::ResolveError) {
+    log_span_backtrace("dup", &e.span);
+    log_span_backtrace("first", &e.first_span);
     let dup_loc = rtoy_span::offset_to_line_col(src, e.span.lo);
     let first_caret = rtoy_span::caret_line(src, e.first_span);
     let dup_caret = rtoy_span::caret_line(src, e.span);
@@ -41,6 +43,21 @@ pub fn print_resolve_error(file: &str, src: &str, e: &rtoy_resolve::ResolveError
                 eprintln!("caused by: {src_err}");
             }
         }
+    }
+}
+
+fn log_span_backtrace(tag: &str, sp: &rtoy_span::Span) {
+    eprintln!("[backtrace] {tag} span=[{}..{}@c{}] chain={}", sp.lo, sp.hi, sp.ctxt.0, sp.chain());
+    let mut cur = *sp;
+    let mut depth = 0;
+    while let Some(d) = cur.expansion() {
+        eprintln!("[backtrace] {tag} depth={depth} call=[{}..{}] parent=[{}..{}]", d.call_site.lo, d.call_site.hi, d.parent_span.lo, d.parent_span.hi);
+        cur = d.parent_span;
+        depth += 1;
+        if depth > 8 { break; }
+    }
+    if depth == 0 {
+        eprintln!("[backtrace] {tag} depth=0 root, no expansion parent");
     }
 }
 
