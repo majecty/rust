@@ -4,7 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [workspace]
-members = ["my-macro"]
+members = ["my-macro", "my-macro-common"]
 
 [dependencies]
 my-macro = { path = "my-macro" }
+my-macro-common = { path = "my-macro-common" }

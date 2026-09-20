@@ -1,0 +1,1 @@
+/home/piagent/code/rust/toy/transparency-demo/target/debug/transparency-demo: /home/piagent/code/rust/toy/transparency-demo/my-macro/src/lib.rs /home/piagent/code/rust/toy/transparency-demo/my-macro-common/src/lib.rs /home/piagent/code/rust/toy/transparency-demo/src/main.rs

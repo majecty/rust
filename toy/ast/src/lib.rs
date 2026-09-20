@@ -33,7 +33,54 @@ pub enum ItemKind {
     Fn(FnItem),
     /// `def_fn!(foo)` — 아이템 위치 매크로 호출 (expand 전).
     Macro { name: Ident, args: Vec<Expr> },
+    /// `macro_rules! twice { ($x:expr) => { $x + $x } }`
+    MacroDef(MacroDef),
     // TODO: picks: Struct/Const/Mod
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Vis {
+    Private,
+    PubCrate,
+    PubSuper,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct MacroDef {
+    pub name: Ident,
+    pub arms: Vec<MacroArm>,
+    pub vis: Vis,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct MacroArm {
+    pub pattern: TokenTree,
+    pub template: TokenTree,
+    pub span: Span,
+}
+
+/// 미니 토큰 트리 — 패턴 매칭/전개에 사용.
+#[derive(Debug, Clone, PartialEq)]
+pub enum TokenTree {
+    Token(TokenNode),
+    Delimited { kind: DelimKind, trees: Vec<TokenTree> },
+    /// `$x:expr` 같은 패턴 와일드카드.
+    Placeholder { name: String, frag: String },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum TokenNode {
+    Ident(String),
+    Literal(String),
+    Punct(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DelimKind {
+    Paren,  // ()
+    Brace,  // {}
+    Bracket, // []
 }
 
 #[derive(Debug, Clone, PartialEq)]

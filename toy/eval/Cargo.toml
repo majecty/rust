@@ -1,0 +1,8 @@
+[package]
+name = "rtoy-eval"
+version = "0.0.1"
+edition = "2021"
+
+[dependencies]
+rtoy-ast = { path = "../ast" }
+rtoy-span = { path = "../span" }

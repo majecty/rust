@@ -17,16 +17,17 @@
 - [로드맵](docs/roadmap.md) — 다음 단계·이슈·위키
 
 ## 3. 현재 상태 요약
-- 워크스페이스 members에 toy 7개 crate 등록 (ast/driver/expand/lexer/span/tokenstream-lowering/resolve)
+- 워크스페이스 members에 toy 8개 crate 등록 (ast/driver/eval/expand/lexer/span/tokenstream-lowering/resolve)
 - span: `Span{lo,hi,ctxt,parent}` + `SyntaxContext/ExpnId/ExpnData` + `root/copied_arg/fresh_child/chain/same_var` + 테스트 5개
 - lexer: char_indices tokenize + `Comment`(`//`~개행전) + 테스트 1개 (`lexer→ast` 역전 해소)
-- ast: Crate/Item/Fn/Block/Stmt(`Expr`/`Let`)/`LetStmt{name,ty,init}`/Expr(`Int`/`Var`/`Call`/`Macro`)/이항연산 + 테스트 1개
-- expand: `lift/expand(twice/my_let)` + `expand_expr/expand_item/expand_crate(twice!/def_fn!)` + 테스트 4개
+- ast: Crate/Item/Fn/Block/Stmt(`Expr`/`Let`)/`LetStmt{name,ty,init}`/Expr(`Int`/`Var`/`Call`/`Macro`)/이항연산/`MacroDef`/`TokenTree`/`Vis` + 테스트 1개
+- expand: `lift/expand(twice/my_let)` + `expand_expr/expand_item/expand_crate(twice!/def_fn!)` + `macro_rules!` 패턴매칭/전개 + 테스트 11개
+- eval: 미니 AST 인터프리터 — `Int`/`Var`/`Binary`/`Call`/`Let` 평가 + 테스트 7개
 - samples: `twice.rs` · `dup-fn-macro.rs` (`def_fn!(foo)+fn foo` 중복 재현) · driver `--trace` 한 줄 요약
 - lowering: `fn name() { stmt* tail? }` + 아이템 매크로 `def_fn!(foo)` pull 파서 + 테스트 5개
 - resolve: 중복 fn 검사(미전개 Macro 제외) + 매크로/직접정의 중복 통합테스트 + 테스트 3개
 - driver: lex → lowering → expand → resolve → AST 출력 (`--sample twice` 통과, trace시 최종 덤프 생략)
-- 테스트 총 16개 통과 (span 5/expand 3/ast 1/lexer 1/lowering 4/resolve 2) · 커밋 `60f46d5` `994c6af` `84eebf4`
+- 테스트 총 31개 통과 (span 5/expand 10/ast 1/lexer 1/lowering 4/resolve 2/eval 7) · macro_rules 패턴매칭/전개 + eval 인터프리터 추가
 - Span: lexer→span→ast→lowering 배선 완료
   - `Token.span`, `Item.span`, `Block.span`, `Expr.span` 필드 유지
   - lowering: Item/Block/Expr span 생성 및 연결
@@ -50,7 +51,12 @@
 - [x] Driver: `--trace` 단계별 한 줄 요약 (lex/before/after/final)
 - [ ] Span 배선: 전개 생성토큰에 `parent/ctxt` 연결 (`chain` 역추적·`same_var` 위생)
 - [x] Expand: `def_fn!(foo)->fn foo(){}` 아이템 매크로 + `expand_item` (중복 에러문구 고민용)
+- [x] Expand: `macro_rules!` 미니 구현 — `$x:expr` 패턴매칭 + 템플릿전개 + `MacroDef`/`TokenTree`/`Vis` AST 노드 + 테스트 7개
+- [ ] Expand: `$(...)*` 반복 패턴 지원
+- [ ] Expand: `$x:ident`, `$x:ty` 등 fragment 종류 확장
+- [x] Eval: 미니 인터프리터 — `fn main()` 실행 + `let`/`+`/`-`/`*`/`/`/`%` 지원 + 함수 호출 + 테스트 7개
 - [ ] Expand: `my_let!` AST 전개 + 위생 테스트
+- [ ] Eval: 재귀 함수 지원 + `if` 조건문
 - [ ] Resolve 진단: 매크로 생성 이름의 `expanded from def_fn! here` note + snippet이 호출문 전체를 보여줄지 결정
 - [ ] Span/docs: `docs/status.md` 7-crate 동기화
 - [ ] HIR 스텁: AST → 간단 HIR ([상세](docs/roadmap.md))
