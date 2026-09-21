@@ -156,6 +156,10 @@ pub fn expand_item(item: rtoy_ast::Item) -> Result<rtoy_ast::Item, ExpandError> 
             // macro_rules! 정의는 그대로 유지 (나중에 resolve에서 사용)
             Ok(rtoy_ast::Item { name: item.name, kind: ItemKind::MacroDef(def), span: item.span })
         }
+        ItemKind::Struct(s) => {
+            // 구조체 정의는 그대로 유지 (eval에서 사용)
+            Ok(rtoy_ast::Item { name: item.name, kind: ItemKind::Struct(s), span: item.span })
+        }
     }
 }
 
@@ -174,7 +178,7 @@ fn dummy_expr() -> rtoy_ast::Expr {
 
 // ─── macro_rules! 패턴 매칭 + 전개 ───────────────────────────────
 
-use rtoy_ast::{MacroArm, MacroDef, TokenTree, TokenNode};
+use rtoy_ast::{MacroDef, TokenTree, TokenNode};
 
 /// 토큰 리스트를 TokenTree로 변환 (최소 파서).
 pub fn parse_token_trees(toks: &[Token], src: &str) -> Result<Vec<TokenTree>, ExpandError> {
@@ -491,7 +495,11 @@ mod tests {
         };
         let out = expand_item(item).unwrap();
         assert_eq!(out.name.name, "foo");
-        assert_eq!(out.name.span, arg_span);
+        // copied_arg는 lo/hi/ctxt를 인자 그대로 두고 parent로 확장 정보만 부여한다.
+        assert_eq!(out.name.span.lo, arg_span.lo);
+        assert_eq!(out.name.span.hi, arg_span.hi);
+        assert_eq!(out.name.span.ctxt, arg_span.ctxt);
+        assert!(out.name.span.parent.is_some());
         assert!(matches!(out.kind, ItemKind::Fn(f) if f.body.stmts.is_empty() && f.body.tail.is_none()));
     }
 
@@ -560,7 +568,7 @@ mod tests {
     fn expand_macro_rules_call() {
         let defs = vec![MacroDef {
             name: rtoy_ast::Ident { name: "twice".into(), span: Span::root(0, 5) },
-            arms: vec![MacroArm {
+            arms: vec![rtoy_ast::MacroArm {
                 pattern: TokenTree::Delimited {
                     kind: rtoy_ast::DelimKind::Paren,
                     trees: vec![TokenTree::Placeholder { name: "x".into(), frag: "expr".into() }],

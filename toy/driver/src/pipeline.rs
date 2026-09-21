@@ -22,7 +22,7 @@ pub fn run(args: &[String]) -> i32 {
             return EXIT_FAILURE;
         }
     };
-    let _ast_only = cli.ast_only;
+    let ast_only = cli.ast_only;
     let mut owned_path = String::new();
     let src_path = resolve_src_path(&cli, &mut owned_path);
     let src = match read_src(&src_path) {
@@ -33,10 +33,10 @@ pub fn run(args: &[String]) -> i32 {
     if cli.lex_only {
         return run_lex_only(&tokens, &src);
     }
-    run_pipeline(&src_path, &src, cli.trace)
+    run_pipeline(&src_path, &src, cli.trace, ast_only)
 }
 
-fn run_pipeline(src_path: &str, src: &str, trace: bool) -> i32 {
+fn run_pipeline(src_path: &str, src: &str, trace: bool, ast_only: bool) -> i32 {
     let tokens = rtoy_lexer::tokenize(src);
     if trace {
         println!("== lex ({} tokens) ==", tokens.len());
@@ -76,10 +76,18 @@ fn run_pipeline(src_path: &str, src: &str, trace: bool) -> i32 {
     }
     if trace {
         trace_crate("final", &krate, src);
-    } else {
-        println!("ast: {:#?}", krate);
     }
-    // TODO: parser -> ast_lowering (stub for now)
+    if ast_only {
+        println!("ast: {:#?}", krate);
+        return EXIT_SUCCESS;
+    }
+    match rtoy_eval::eval_crate(&krate) {
+        Ok(value) => println!("value: {value}"),
+        Err(e) => {
+            print_error_chain("eval failed", &e);
+            return EXIT_FAILURE;
+        }
+    }
     EXIT_SUCCESS
 }
 
@@ -138,7 +146,8 @@ fn resolve_src_path(cli: &args::CliArgs, owned: &mut String) -> String {
 fn print_help() {
     println!("rtoy [--lex|--ast] <file.rs> | --sample <name> — minimal rustc_driver toy");
     println!("  --lex: lex 결과물만 출력하고 종료");
-    println!("  --ast: AST까지 출력하고 종료 (기본 동작과 동일, 명시용)");
+    println!("  --ast: AST만 출력하고 종료");
+    println!("  (기본) main을 eval 실행해 `value:` 출력");
     println!("  --sample <name>: toy/samples/<name>.rs 실행");
     println!("  --trace: lex→lowering(before)→expand(after) 단계별 출력");
     println!("  passes (stub): lex -> parse -> ast_lower -> hir -> done");

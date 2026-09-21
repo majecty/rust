@@ -31,11 +31,25 @@ pub struct Item {
 #[derive(Debug, Clone, PartialEq)]
 pub enum ItemKind {
     Fn(FnItem),
+    Struct(StructItem),
     /// `def_fn!(foo)` — 아이템 위치 매크로 호출 (expand 전).
     Macro { name: Ident, args: Vec<Expr> },
     /// `macro_rules! twice { ($x:expr) => { $x + $x } }`
     MacroDef(MacroDef),
-    // TODO: picks: Struct/Const/Mod
+    // TODO: picks: Const/Mod
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct StructItem {
+    pub fields: Vec<StructField>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct StructField {
+    pub name: Ident,
+    pub ty: Ty,
+    pub span: Span,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -140,9 +154,21 @@ pub enum ExprKind {
     /// `foo(a, b)` — callee는 함수 이름만, 인자는 식.
     Call { callee: Ident, args: Vec<Expr> },
     Binary { op: BinOp, lhs: Box<Expr>, rhs: Box<Expr> },
+    /// `Point { x: 1, y: 2 }` — 구조체 리터럴.
+    StructLiteral { name: Ident, fields: Vec<FieldInit> },
+    /// `p.x` — 필드 접근.
+    FieldAccess { base: Box<Expr>, field: Ident },
     /// `twice!(y)` — 함수형 매크로 호출 (expand 전).
     Macro { name: Ident, args: Vec<Expr> },
     // TODO: picks: Block
+}
+
+/// 구조체 리터럴의 필드 초기화.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FieldInit {
+    pub name: Ident,
+    pub value: Expr,
+    pub span: Span,
 }
 
 /// 빈 `fn main(){}` 더미 — driver 배선 확인용.

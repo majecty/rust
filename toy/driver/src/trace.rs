@@ -3,11 +3,18 @@
 pub fn trace_crate(label: &str, krate: &rtoy_ast::Crate, src: &str) {
     println!("== {label} ==");
     for item in &krate.items {
-        println!("fn {} {}", item.name.name, short_span(&item.span));
-        let rtoy_ast::ItemKind::Fn(f) = &item.kind else {
-            println!("  <unexpanded macro>");
-            continue;
+        let f = match &item.kind {
+            rtoy_ast::ItemKind::Fn(f) => f,
+            rtoy_ast::ItemKind::Struct(s) => {
+                println!("struct {} ({} fields) {}", item.name.name, s.fields.len(), short_span(&item.span));
+                continue;
+            }
+            _ => {
+                println!("macro {} {}", item.name.name, short_span(&item.span));
+                continue;
+            }
         };
+        println!("fn {} {}", item.name.name, short_span(&item.span));
         for s in &f.body.stmts {
             match &s.kind {
                 rtoy_ast::StmtKind::Let(l) => println!(
@@ -43,6 +50,10 @@ fn expr_sum(e: &rtoy_ast::Expr, src: &str) -> String {
         rtoy_ast::ExprKind::Macro { name, args } => {
             format!("Macro({}!/{})", name.name, args.len())
         }
+        rtoy_ast::ExprKind::StructLiteral { name, fields } => {
+            format!("StructLit({}/{})", name.name, fields.len())
+        }
+        rtoy_ast::ExprKind::FieldAccess { field, .. } => format!("Field({})", field.name),
     };
     format!("{kind} {snip:?} {}", short_span(&e.span))
 }

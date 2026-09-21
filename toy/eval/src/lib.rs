@@ -29,27 +29,47 @@ impl std::fmt::Display for EvalError {
 
 impl std::error::Error for EvalError {}
 
-/// 함수 정의 저장소.
-struct FnEnv {
+/// 환경: 함수 정의 + 구조체 정의 저장소.
+struct Env {
     fns: HashMap<String, FnItem>,
+    structs: HashMap<String, StructItem>,
 }
 
 /// 값 타입.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
     Int(i64),
+    Struct { name: String, fields: HashMap<String, Value> },
     Unit,
+}
+
+impl std::fmt::Display for Value {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Value::Int(n) => write!(f, "{n}"),
+            Value::Unit => write!(f, "()"),
+            Value::Struct { name, fields } => {
+                let mut keys: Vec<&String> = fields.keys().collect();
+                keys.sort();
+                let body: Vec<String> = keys.iter().map(|k| format!("{k}: {}", fields[*k])).collect();
+                write!(f, "{name} {{ {} }}", body.join(", "))
+            }
+        }
+    }
 }
 
 /// Crate를 실행하여 main의 반환값을 계산.
 pub fn eval_crate(krate: &Crate) -> Result<Value, EvalError> {
-    let mut env = FnEnv { fns: HashMap::new() };
+    let mut env = Env { fns: HashMap::new(), structs: HashMap::new() };
 
-    // 모든 함수를 env에 등록
+    // 모든 아이템을 env에 등록
     for item in &krate.items {
         match &item.kind {
             ItemKind::Fn(f) => {
                 env.fns.insert(item.name.name.clone(), f.clone());
+            }
+            ItemKind::Struct(s) => {
+                env.structs.insert(item.name.name.clone(), s.clone());
             }
             ItemKind::MacroDef(_) => {} // 매크로 정의는 무시
             ItemKind::Macro { .. } => {} // 미전개 매크로는 무시
@@ -64,32 +84,32 @@ pub fn eval_crate(krate: &Crate) -> Result<Value, EvalError> {
 }
 
 /// 블록 실행.
-fn eval_block(block: &Block, fn_env: &mut FnEnv, var_env: &mut HashMap<String, Value>) -> Result<Value, EvalError> {
+fn eval_block(block: &Block, env: &mut Env, var_env: &mut HashMap<String, Value>) -> Result<Value, EvalError> {
     for stmt in &block.stmts {
         match &stmt.kind {
             StmtKind::Let(let_stmt) => {
                 let val = if let Some(init) = &let_stmt.init {
-                    eval_expr(init, fn_env, var_env)?
+                    eval_expr(init, env, var_env)?
                 } else {
                     Value::Int(0)
                 };
                 var_env.insert(let_stmt.name.name.clone(), val);
             }
             StmtKind::Expr(expr) => {
-                eval_expr(expr, fn_env, var_env)?;
+                eval_expr(expr, env, var_env)?;
             }
         }
     }
 
     if let Some(tail) = &block.tail {
-        eval_expr(tail, fn_env, var_env)
+        eval_expr(tail, env, var_env)
     } else {
         Ok(Value::Unit)
     }
 }
 
 /// 식 계산.
-fn eval_expr(expr: &Expr, fn_env: &mut FnEnv, var_env: &mut HashMap<String, Value>) -> Result<Value, EvalError> {
+fn eval_expr(expr: &Expr, env: &mut Env, var_env: &mut HashMap<String, Value>) -> Result<Value, EvalError> {
     match &expr.kind {
         ExprKind::Int(n) => Ok(Value::Int(*n)),
 
@@ -100,8 +120,8 @@ fn eval_expr(expr: &Expr, fn_env: &mut FnEnv, var_env: &mut HashMap<String, Valu
         }
 
         ExprKind::Binary { op, lhs, rhs } => {
-            let l = eval_expr(lhs, fn_env, var_env)?;
-            let r = eval_expr(rhs, fn_env, var_env)?;
+            let l = eval_expr(lhs, env, var_env)?;
+            let r = eval_expr(rhs, env, var_env)?;
             match (op, &l, &r) {
                 (BinOp::Add, Value::Int(a), Value::Int(b)) => Ok(Value::Int(a + b)),
                 (BinOp::Sub, Value::Int(a), Value::Int(b)) => Ok(Value::Int(a - b)),
@@ -118,14 +138,38 @@ fn eval_expr(expr: &Expr, fn_env: &mut FnEnv, var_env: &mut HashMap<String, Valu
             }
         }
 
+        ExprKind::StructLiteral { name, fields } => {
+            let _ = env.structs.get(&name.name)
+                .ok_or_else(|| EvalError::NotImplemented(format!("unknown struct {}", name.name)))?;
+            let mut field_map = HashMap::new();
+            for f in fields {
+                let val = eval_expr(&f.value, env, var_env)?;
+                field_map.insert(f.name.name.clone(), val);
+            }
+            Ok(Value::Struct { name: name.name.clone(), fields: field_map })
+        }
+
+        ExprKind::FieldAccess { base, field } => {
+            let val = eval_expr(base, env, var_env)?;
+            match val {
+                Value::Struct { name: _, fields } => {
+                    fields.get(&field.name)
+                        .cloned()
+                        .ok_or_else(|| EvalError::NotImplemented(format!("unknown field {}", field.name)))
+                }
+                _ => Err(EvalError::NotImplemented("field access on non-struct".into())),
+            }
+        }
+
         ExprKind::Call { callee, args } => {
             // 내장 함수 처리
             if callee.name == "print" {
-                let vals: Result<Vec<_>, _> = args.iter().map(|a| eval_expr(a, fn_env, var_env)).collect();
+                let vals: Result<Vec<_>, _> = args.iter().map(|a| eval_expr(a, env, var_env)).collect();
                 let vals = vals?;
                 for v in &vals {
                     match v {
                         Value::Int(n) => print!("{} ", n),
+                        Value::Struct { name, .. } => print!("{} {{...}} ", name),
                         Value::Unit => print!("() "),
                     }
                 }
@@ -134,7 +178,7 @@ fn eval_expr(expr: &Expr, fn_env: &mut FnEnv, var_env: &mut HashMap<String, Valu
             }
 
             // 사용자 정의 함수
-            let f = fn_env.fns.get(&callee.name)
+            let f = env.fns.get(&callee.name)
                 .ok_or_else(|| EvalError::NotAFunction(callee.name.clone()))?
                 .clone();
 
@@ -148,9 +192,9 @@ fn eval_expr(expr: &Expr, fn_env: &mut FnEnv, var_env: &mut HashMap<String, Valu
             for stmt in &f.body.stmts {
                 if let StmtKind::Let(let_stmt) = &stmt.kind {
                     let val = if arg_idx < args.len() {
-                        eval_expr(&args[arg_idx], fn_env, var_env)?
+                        eval_expr(&args[arg_idx], env, var_env)?
                     } else if let Some(init) = &let_stmt.init {
-                        eval_expr(init, fn_env, &mut local_vars)?
+                        eval_expr(init, env, &mut local_vars)?
                     } else {
                         Value::Int(0)
                     };
@@ -162,12 +206,12 @@ fn eval_expr(expr: &Expr, fn_env: &mut FnEnv, var_env: &mut HashMap<String, Valu
             // 본문 실행 (let 문은 위에서 처리했으므로 expr만)
             for stmt in &f.body.stmts {
                 if let StmtKind::Expr(expr) = &stmt.kind {
-                    eval_expr(expr, fn_env, &mut local_vars)?;
+                    eval_expr(expr, env, &mut local_vars)?;
                 }
             }
 
             if let Some(tail) = &f.body.tail {
-                eval_expr(tail, fn_env, &mut local_vars)
+                eval_expr(tail, env, &mut local_vars)
             } else {
                 Ok(Value::Unit)
             }
@@ -204,10 +248,6 @@ mod tests {
             }),
             span: Span::root(0, 0),
         }
-    }
-
-    fn expr_stmt(e: Expr) -> Stmt {
-        Stmt { kind: StmtKind::Expr(e), span: Span::root(0, 0) }
     }
 
     fn main_fn(stmts: Vec<Stmt>, tail: Option<Expr>) -> Item {
@@ -289,5 +329,89 @@ mod tests {
     fn eval_empty_main() {
         let krate = Crate { items: vec![], span: Span::root(0, 0) };
         assert!(matches!(eval_crate(&krate), Err(EvalError::NotAFunction(_))));
+    }
+
+    // 구조체 관련 헬퍼
+    fn struct_def(name: &str, fields: Vec<(&str, &str)>) -> Item {
+        let s = Span::root(0, 0);
+        Item {
+            name: Ident { name: name.into(), span: s },
+            kind: ItemKind::Struct(StructItem {
+                fields: fields.into_iter().map(|(n, t)| StructField {
+                    name: Ident { name: n.into(), span: s },
+                    ty: Ty { name: t.into(), span: s },
+                    span: s,
+                }).collect(),
+                span: s,
+            }),
+            span: s,
+        }
+    }
+
+    fn struct_literal(name: &str, fields: Vec<(&str, Expr)>) -> Expr {
+        let s = Span::root(0, 0);
+        Expr {
+            kind: ExprKind::StructLiteral {
+                name: Ident { name: name.into(), span: s },
+                fields: fields.into_iter().map(|(n, v)| FieldInit {
+                    name: Ident { name: n.into(), span: s },
+                    value: v,
+                    span: s,
+                }).collect(),
+            },
+            span: s,
+        }
+    }
+
+    fn field_access(base: Expr, field: &str) -> Expr {
+        let s = Span::root(0, 0);
+        Expr {
+            kind: ExprKind::FieldAccess {
+                base: Box::new(base),
+                field: Ident { name: field.into(), span: s },
+            },
+            span: s,
+        }
+    }
+
+    #[test]
+    fn eval_struct_literal() {
+        let krate = Crate {
+            items: vec![
+                struct_def("Point", vec![("x", "i64"), ("y", "i64")]),
+                main_fn(vec![], Some(struct_literal("Point", vec![
+                    ("x", int_lit(1)),
+                    ("y", int_lit(2)),
+                ]))),
+            ],
+            span: Span::root(0, 0),
+        };
+        let val = eval_crate(&krate).unwrap();
+        match val {
+            Value::Struct { name, fields } => {
+                assert_eq!(name, "Point");
+                assert_eq!(fields["x"], Value::Int(1));
+                assert_eq!(fields["y"], Value::Int(2));
+            }
+            _ => panic!("expected struct value"),
+        }
+    }
+
+    #[test]
+    fn eval_field_access() {
+        let krate = Crate {
+            items: vec![
+                struct_def("Point", vec![("x", "i64"), ("y", "i64")]),
+                main_fn(vec![], Some(field_access(
+                    struct_literal("Point", vec![
+                        ("x", int_lit(10)),
+                        ("y", int_lit(20)),
+                    ]),
+                    "x",
+                ))),
+            ],
+            span: Span::root(0, 0),
+        };
+        assert_eq!(eval_crate(&krate).unwrap(), Value::Int(10));
     }
 }

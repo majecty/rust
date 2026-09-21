@@ -1,7 +1,7 @@
 //! rtoy tokenstream-lowering — token stream → AST.
 //! Original: compiler/rustc_parse (parser/expr.rs, item.rs).
 
-use rtoy_ast::{BinOp, Block, Crate, Expr, ExprKind, FnItem, Ident, Item, ItemKind, LetStmt, Stmt, StmtKind, Ty};
+use rtoy_ast::{BinOp, Block, Crate, Expr, ExprKind, FieldInit, FnItem, Ident, Item, ItemKind, LetStmt, Stmt, StmtKind, StructField, StructItem, Ty};
 use rtoy_span::{Span, SpanError};
 use rtoy_lexer::{Token, TokenKind};
 
@@ -69,6 +69,9 @@ impl<'a> Lowering<'a> {
         if self.is_macro_item() {
             return self.parse_macro_item();
         }
+        if self.peek_is_ident("struct") {
+            return self.parse_struct_item();
+        }
         let (fn_tok, name) = self.parse_fn_head()?;
         let body = self.parse_block()?;
         let span = Span::root(fn_tok.span.lo, body.span.hi);
@@ -118,6 +121,45 @@ impl<'a> Lowering<'a> {
         }
         let span = Span::root(name_tok.span.lo, hi);
         Ok(Item { name: ident.clone(), kind: ItemKind::Macro { name: ident, args }, span })
+    }
+
+    /// 구조체 정의. 예: `struct Point { x: i64, y: i64 }`.
+    fn parse_struct_item(&mut self) -> Result<Item, LowerError> {
+        let kw = self.expect_ident("struct keyword", "struct")?;
+        let name_tok = self.expect("struct name", TokenKind::Ident, "struct name")?;
+        let name = Ident { name: self.ident_text("struct name", &name_tok)?, span: name_tok.span };
+        self.expect_punct("struct body", '{')?;
+        let fields = self.parse_struct_fields()?;
+        let close = self.expect_punct("struct body", '}')?;
+        let mut hi = close.span.hi;
+        self.skip_trivia();
+        if self.peek_is_punct(';') {
+            hi = self.bump().expect("peeked `;`").span.hi;
+        }
+        let span = Span::root(kw.span.lo, hi);
+        Ok(Item { name, kind: ItemKind::Struct(StructItem { fields, span }), span })
+    }
+
+    /// 구조체 필드 목록. 예: `x: i64, y: i64,` — 닫는 `}`는 소비하지 않는다.
+    fn parse_struct_fields(&mut self) -> Result<Vec<StructField>, LowerError> {
+        let mut fields = Vec::new();
+        loop {
+            self.skip_trivia();
+            if self.peek_is_punct('}') {
+                return Ok(fields);
+            }
+            let f_tok = self.expect("struct field name", TokenKind::Ident, "field name")?;
+            let field_name = Ident { name: self.ident_text("struct field name", &f_tok)?, span: f_tok.span };
+            self.expect_punct("struct field colon", ':')?;
+            let ty_tok = self.expect("struct field type", TokenKind::Ident, "type name")?;
+            let ty = Ty { name: self.ident_text("struct field type", &ty_tok)?, span: ty_tok.span };
+            let span = Span::root(f_tok.span.lo, ty_tok.span.hi);
+            fields.push(StructField { name: field_name, ty, span });
+            self.skip_trivia();
+            if self.peek_is_punct(',') {
+                self.bump();
+            }
+        }
     }
 
     /// fn 헤더. 예: `fn main()`.
@@ -205,12 +247,12 @@ impl<'a> Lowering<'a> {
 
     /// 곱셈급. 예: `2 * 3`, `8 / 4`, `7 % 2` (좌결합).
     fn parse_multiplicative(&mut self) -> Result<Expr, LowerError> {
-        let mut lhs = self.parse_atom()?;
+        let mut lhs = self.parse_postfix()?;
         loop {
             self.skip_trivia();
             let Some(op) = self.peek_binop(&[("*", BinOp::Mul), ("/", BinOp::Div), ("%", BinOp::Mod)]) else { break };
             self.bump();
-            let rhs = self.parse_atom()?;
+            let rhs = self.parse_postfix()?;
             lhs = self.join_binary(op, lhs, rhs);
         }
         Ok(lhs)
@@ -227,6 +269,23 @@ impl<'a> Lowering<'a> {
         if t.kind != TokenKind::Punct { return None; }
         let text = t.span.try_snippet(self.src).ok()?;
         ops.iter().find(|(s, _)| *s == text).map(|(_, op)| *op)
+    }
+
+    /// 후위식. 예: `p.x.y` — 원자식 뒤 `.field`를 반복 적용.
+    fn parse_postfix(&mut self) -> Result<Expr, LowerError> {
+        let mut e = self.parse_atom()?;
+        loop {
+            self.skip_trivia();
+            if !self.peek_is_punct('.') {
+                break;
+            }
+            self.bump();
+            let f_tok = self.expect("field access", TokenKind::Ident, "field name")?;
+            let field = Ident { name: self.ident_text("field access", &f_tok)?, span: f_tok.span };
+            let span = Span::root(e.span.lo, f_tok.span.hi);
+            e = Expr { kind: ExprKind::FieldAccess { base: Box::new(e), field }, span };
+        }
+        Ok(e)
     }
 
     /// 원자식. 예: `42`, `x`, `foo(1)`.
@@ -283,8 +342,36 @@ impl<'a> Lowering<'a> {
             let span = Span::root(t.span.lo, end);
             return Ok(Expr { kind: ExprKind::Macro { name: ident, args }, span });
         }
+        if self.peek_is_punct('{') {
+            self.bump();
+            let fields = self.parse_field_inits()?;
+            let close = self.expect_punct("struct literal", '}')?;
+            let span = Span::root(t.span.lo, close.span.hi);
+            return Ok(Expr { kind: ExprKind::StructLiteral { name: ident, fields }, span });
+        }
         self.pos = save;
         Ok(Expr { kind: ExprKind::Var(ident), span: t.span })
+    }
+
+    /// 구조체 리터럴 필드 목록. 예: `x: 1, y: 2` — 닫는 `}`는 소비하지 않는다.
+    fn parse_field_inits(&mut self) -> Result<Vec<FieldInit>, LowerError> {
+        let mut fields = Vec::new();
+        loop {
+            self.skip_trivia();
+            if self.peek_is_punct('}') {
+                return Ok(fields);
+            }
+            let f_tok = self.expect("struct literal field", TokenKind::Ident, "field name")?;
+            let name = Ident { name: self.ident_text("struct literal field", &f_tok)?, span: f_tok.span };
+            self.expect_punct("struct literal colon", ':')?;
+            let value = self.parse_expr()?;
+            let span = Span::root(f_tok.span.lo, value.span.hi);
+            fields.push(FieldInit { name, value, span });
+            self.skip_trivia();
+            if self.peek_is_punct(',') {
+                self.bump();
+            }
+        }
     }
 
     /// 호출 인자. 예: `(1, x)` — `(foo())`의 `)` 끝 오프셋까지 소비.
@@ -346,6 +433,17 @@ impl<'a> Lowering<'a> {
 
     fn peek_text(&self, t: &Token) -> Result<String, SpanError> {
         t.span.try_snippet(self.src).map(str::to_string)
+    }
+
+    /// 토큰 텍스트를 얻고, 실패 시 LowerError(source=SpanError)로 감싼다.
+    fn ident_text(&self, context: &'static str, t: &Token) -> Result<String, LowerError> {
+        self.peek_text(t).map_err(|e| LowerError {
+            context,
+            expected: "valid identifier text".into(),
+            found: Some((t.kind, "<invalid span>".into(), t.span)),
+            pos: self.pos,
+            source: Some(e),
+        })
     }
 
     fn found_here(&self) -> Option<(TokenKind, String, Span)> {
@@ -514,6 +612,49 @@ mod tests {
                 assert_eq!(args[0].span.snippet(src), "foo");
             }
             other => panic!("expected item macro, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn lowers_struct_def() {
+        let src = "struct Point { x: i64, y: i64 }";
+        let toks = tokenize(src);
+        let krate = lower(&toks, src);
+        assert_eq!(krate.items[0].name.name, "Point");
+        match &krate.items[0].kind {
+            ItemKind::Struct(s) => {
+                assert_eq!(s.fields.len(), 2);
+                assert_eq!(s.fields[0].name.name, "x");
+                assert_eq!(s.fields[0].ty.name, "i64");
+                assert_eq!(s.fields[1].name.name, "y");
+            }
+            other => panic!("expected struct, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn lowers_struct_literal_and_field() {
+        let src = "fn main() { let p = Point { x: 1, y: 2 }; p.x + p.y }";
+        let toks = tokenize(src);
+        let krate = lower(&toks, src);
+        let ItemKind::Fn(f) = &krate.items[0].kind else { panic!("expected Fn") };
+        let StmtKind::Let(l) = &f.body.stmts[0].kind else { panic!("expected let") };
+        match &l.init.as_ref().unwrap().kind {
+            ExprKind::StructLiteral { name, fields } => {
+                assert_eq!(name.name, "Point");
+                assert_eq!(fields.len(), 2);
+                assert_eq!(fields[0].name.name, "x");
+            }
+            other => panic!("expected struct literal, got {other:?}"),
+        }
+        let tail = f.body.tail.as_ref().unwrap();
+        assert_eq!(tail.span.snippet(src), "p.x + p.y");
+        match &tail.kind {
+            ExprKind::Binary { op: BinOp::Add, lhs, rhs } => {
+                assert!(matches!(&lhs.kind, ExprKind::FieldAccess { field, .. } if field.name == "x"));
+                assert!(matches!(&rhs.kind, ExprKind::FieldAccess { field, .. } if field.name == "y"));
+            }
+            other => panic!("expected add, got {other:?}"),
         }
     }
 }
