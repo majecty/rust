@@ -17,6 +17,7 @@
 - `rtoy-resolve`: 중복 fn 검사(미전개 Macro 제외) + 필드 참조 `ident → slot` 제자리 변형(`&mut Crate`) · 테스트 5
 - `rtoy-eval`: 단일 byte array 메모리 인터프리터 — `Memory(Vec<u8>)` + `StructLayout{size, slots}`, `Value::Struct`는 offset 핸들, 필드는 byte offset으로 읽고 씀. resolve가 채운 slot 우선(미해결만 이름 fallback), `if`/`<`/재귀 지원 · 테스트 16
 - `rtoy-driver`: `--lex`/`--ast`/`--trace` + eval 배선(`Runtime::format_value`)
+- `toy/bench/fib-bench.ts`: 언어별 재귀 fib 비교(rtoy 포함, 컴파일 시간 제외, lua/luajit는 없으면 소스 빌드)
 
 ## 3. 최근 커밋
 - `736cced7bca` toy: struct item, literal, field access + eval

@@ -27,6 +27,7 @@
 - lowering: `fn name() { stmt* tail? }` + `if cond { } else { }` + `<` 비교 + 아이템 매크로 `def_fn!(foo)` + `struct`/리터럴/`p.x` 파서 + 테스트 8개
 - resolve: 중복 fn 검사(미전개 Macro 제외) + **필드 참조 ident→slot 제자리 변형**(`FieldAccess/FieldInit.slot`) + 매크로/직접정의 중복 통합테스트 + 테스트 5개
 - driver: lex → lowering → expand → resolve → eval (기본 `value:` 출력, `--ast`면 AST 덤프)
+- bench: `toy/bench/fib-bench.ts` — python/ruby/node/php/perl/lua/luajit/go/c/rust/rtoy fib 비교(미설치·빌드 실패는 SKIP, 컴파일 시간 제외). fib(25) rtoy 650ms ≈ CPython의 27배
 - 테스트 총 47개 통과 (span 5/lexer 1/ast 1/lowering 8/resolve 5/expand 11/eval 16) · struct + slot 변형 + `if`/재귀(fib 실행 가능) 추가
 - Span: lexer→span→ast→lowering 배선 완료
   - `Token.span`, `Item.span`, `Block.span`, `Expr.span` 필드 유지
@@ -71,6 +72,8 @@
 - [ ] Resolve: 제어흐름(`if`·재귀) 도입 시 지역변수 타입 추적을 블록/분기 인식으로 확장
 - [ ] HIR 스텁: AST → 간단 HIR ([상세](docs/roadmap.md))
 - [ ] Eval: 구조체 중첩 필드 (layout 안에 하위 layout offset)
+- [x] Bench: `toy/bench/fib-bench.ts` — 재귀 fib로 python/node/perl/lua/luajit/c/rust/rtoy 비교 (ruby/php/go는 미설치면 SKIP)
+- [ ] Bench: ruby/php/go 측정 추가 (go는 공식 prebuilt tarball로 root 없이 가능)
 - [ ] 위키 정리: 단계마다 `[[rust-*]]` 페이지 ([[rust-rtoy-eval]]은 갱신 완료)
 - [ ] 테스트: crate별 파서 케이스 보강
 
