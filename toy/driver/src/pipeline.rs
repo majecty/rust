@@ -65,10 +65,11 @@ fn run_pipeline(src_path: &str, src: &str, trace: bool, ast_only: bool) -> i32 {
             return EXIT_FAILURE;
         }
     };
+    let mut krate = krate;
     if trace {
         trace_crate("expand (after expand)", &krate, src);
     }
-    if let Err(errs) = rtoy_resolve::resolve(&krate, src) {
+    if let Err(errs) = rtoy_resolve::resolve(&mut krate, src) {
         for e in &errs {
             print_resolve_error(src_path, src, e);
         }
@@ -82,7 +83,7 @@ fn run_pipeline(src_path: &str, src: &str, trace: bool, ast_only: bool) -> i32 {
         return EXIT_SUCCESS;
     }
     match rtoy_eval::eval_crate(&krate) {
-        Ok(value) => println!("value: {value}"),
+        Ok(rt) => println!("value: {}", rt.format_value(&rt.value)),
         Err(e) => {
             print_error_chain("eval failed", &e);
             return EXIT_FAILURE;

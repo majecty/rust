@@ -145,6 +145,8 @@ pub enum BinOp {
     Mul,
     Div,
     Mod,
+    /// `<` — 지금은 Int 비교만, 결과는 0/1 (bool 타입 없음).
+    Lt,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -156,8 +158,11 @@ pub enum ExprKind {
     Binary { op: BinOp, lhs: Box<Expr>, rhs: Box<Expr> },
     /// `Point { x: 1, y: 2 }` — 구조체 리터럴.
     StructLiteral { name: Ident, fields: Vec<FieldInit> },
-    /// `p.x` — 필드 접근.
-    FieldAccess { base: Box<Expr>, field: Ident },
+    /// `p.x` — 필드 접근. `slot`은 resolve가 채우는 필드 순번(미해결이면 None).
+    FieldAccess { base: Box<Expr>, field: Ident, slot: Option<u16> },
+    /// `if cond { .. } else { .. }` — 식으로 평가된다 (else는 없을 수 있음).
+    /// Block이 Expr을 품으므로 Box로 끊는다 (재귀 크기 방지).
+    If { cond: Box<Expr>, then_block: Box<Block>, else_block: Option<Box<Block>> },
     /// `twice!(y)` — 함수형 매크로 호출 (expand 전).
     Macro { name: Ident, args: Vec<Expr> },
     // TODO: picks: Block
@@ -168,6 +173,8 @@ pub enum ExprKind {
 pub struct FieldInit {
     pub name: Ident,
     pub value: Expr,
+    /// resolve가 채우는 필드 순번(선언 순서). 미해결이면 None.
+    pub slot: Option<u16>,
     pub span: Span,
 }
 

@@ -227,9 +227,39 @@ impl<'a> Lowering<'a> {
         Ok(LetStmt { name, ty, init: Some(init), span })
     }
 
-    /// 식. 예: `42`, `x`, `foo(1, x)`, `1 + 2 * 3`.
+    /// 식. 예: `42`, `x`, `foo(1, x)`, `1 + 2 * 3`, `if c { .. } else { .. }`.
     fn parse_expr(&mut self) -> Result<Expr, LowerError> {
-        self.parse_additive()
+        self.skip_trivia();
+        if self.peek_is_ident("if") {
+            return self.parse_if();
+        }
+        let lhs = self.parse_additive()?;
+        self.skip_trivia();
+        let Some(op) = self.peek_binop(&[("<", BinOp::Lt)]) else { return Ok(lhs) };
+        self.bump();
+        let rhs = self.parse_additive()?;
+        Ok(self.join_binary(op, lhs, rhs))
+    }
+
+    /// if 식. 예: `if n < 2 { n } else { 0 }` (else 생략 가능).
+    fn parse_if(&mut self) -> Result<Expr, LowerError> {
+        let if_tok = self.expect_ident("if expr", "if")?;
+        let cond = self.parse_expr()?;
+        let then_block = self.parse_block()?;
+        self.skip_trivia();
+        let else_block = if self.peek_is_ident("else") {
+            self.bump();
+            Some(self.parse_block()?)
+        } else {
+            None
+        };
+        let end = else_block.as_ref().map(|b| b.span.hi).unwrap_or(then_block.span.hi);
+        let kind = ExprKind::If {
+            cond: Box::new(cond),
+            then_block: Box::new(then_block),
+            else_block: else_block.map(Box::new),
+        };
+        Ok(Expr { kind, span: Span::root(if_tok.span.lo, end) })
     }
 
     /// 덧셈급. 예: `1 + 2`, `a - b` (좌결합).
@@ -283,7 +313,7 @@ impl<'a> Lowering<'a> {
             let f_tok = self.expect("field access", TokenKind::Ident, "field name")?;
             let field = Ident { name: self.ident_text("field access", &f_tok)?, span: f_tok.span };
             let span = Span::root(e.span.lo, f_tok.span.hi);
-            e = Expr { kind: ExprKind::FieldAccess { base: Box::new(e), field }, span };
+            e = Expr { kind: ExprKind::FieldAccess { base: Box::new(e), field, slot: None }, span };
         }
         Ok(e)
     }
@@ -366,7 +396,7 @@ impl<'a> Lowering<'a> {
             self.expect_punct("struct literal colon", ':')?;
             let value = self.parse_expr()?;
             let span = Span::root(f_tok.span.lo, value.span.hi);
-            fields.push(FieldInit { name, value, span });
+            fields.push(FieldInit { name, value, slot: None, span });
             self.skip_trivia();
             if self.peek_is_punct(',') {
                 self.bump();
@@ -655,6 +685,24 @@ mod tests {
                 assert!(matches!(&rhs.kind, ExprKind::FieldAccess { field, .. } if field.name == "y"));
             }
             other => panic!("expected add, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn lowers_if_else_with_lt() {
+        let src = "fn main() { if 1 < 2 { 10 } else { 20 } }";
+        let krate = lower(&tokenize(src), src);
+        let ItemKind::Fn(f) = &krate.items[0].kind else { panic!("expected Fn") };
+        let tail = f.body.tail.as_ref().expect("tail");
+        match &tail.kind {
+            ExprKind::If { cond, then_block, else_block } => {
+                assert!(matches!(cond.kind, ExprKind::Binary { op: BinOp::Lt, .. }));
+                assert_eq!(then_block.tail.as_ref().unwrap().span.snippet(src), "10");
+                let else_tail = else_block.as_ref().unwrap().tail.as_ref().unwrap();
+                assert_eq!(else_tail.span.snippet(src), "20");
+                assert_eq!(tail.span.snippet(src), "if 1 < 2 { 10 } else { 20 }");
+            }
+            other => panic!("expected if, got {other:?}"),
         }
     }
 }

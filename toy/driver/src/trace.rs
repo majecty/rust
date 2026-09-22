@@ -53,7 +53,13 @@ fn expr_sum(e: &rtoy_ast::Expr, src: &str) -> String {
         rtoy_ast::ExprKind::StructLiteral { name, fields } => {
             format!("StructLit({}/{})", name.name, fields.len())
         }
-        rtoy_ast::ExprKind::FieldAccess { field, .. } => format!("Field({})", field.name),
+        rtoy_ast::ExprKind::FieldAccess { field, slot, .. } => match slot {
+            Some(i) => format!("Field({}->#{i})", field.name),
+            None => format!("Field({})", field.name),
+        },
+        rtoy_ast::ExprKind::If { then_block, else_block, .. } => {
+            format!("If(then={}/else={})", then_block.stmts.len(), else_block.as_ref().map(|b| b.stmts.len()).unwrap_or(0))
+        }
     };
     format!("{kind} {snip:?} {}", short_span(&e.span))
 }
