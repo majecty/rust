@@ -159,7 +159,8 @@ pub enum ExprKind {
     /// `x` — 변수 참조. `slot`은 resolve가 채우는 프레임 slot 번호(미해결이면 None).
     Var { name: Ident, slot: Option<u16> },
     /// `foo(a, b)` — callee는 함수 이름만, 인자는 식.
-    Call { callee: Ident, args: Vec<Expr> },
+    /// `fn_index`는 resolve가 채우는 함수 테이블 번호(미해결이면 None → eval이 이름 fallback).
+    Call { callee: Ident, args: Vec<Expr>, fn_index: Option<u16> },
     Binary { op: BinOp, lhs: Box<Expr>, rhs: Box<Expr> },
     /// `Point { x: 1, y: 2 }` — 구조체 리터럴.
     StructLiteral { name: Ident, fields: Vec<FieldInit> },

@@ -22,13 +22,13 @@
 - lexer: char_indices tokenize + `Comment`(`//`~개행전) + 테스트 1개 (`lexer→ast` 역전 해소)
 - ast: Crate/Item/Fn/Block/Stmt(`Expr`/`Let`)/`LetStmt`/Expr(`Int`/`Var{name,slot}`/`Call`/`Macro`/`StructLiteral`/`FieldAccess`/`If`)/이항연산(`+ - * / %`·`<`)/`MacroDef`/`StructItem`/`FieldInit` + 테스트 1개
 - expand: `lift/expand(twice/my_let)` + `expand_expr/expand_item/expand_crate(twice!/def_fn!)` + `macro_rules!` 패턴매칭/전개 + 테스트 11개
-- eval: 단일 byte array 메모리 인터프리터 — `Memory(Vec<u8>)` + `StructLayout{size, slots}` + `Value::Struct` offset 핸들, **resolve가 채운 slot 우선**(미해결은 이름 fallback) + **프레임은 arena `Vec<Value>` 위 `Frame{base,size}` 창**(resolve가 채운 `Var/LetStmt.slot`만 사용, 호출마다 창 재사용·할당 없음) + `FnItem.locals`(프레임 크기) + `Rc<FnItem>` 공유 + `if`/`<`/재귀 호출 + 테스트 19개
+- eval: 단일 byte array 메모리 인터프리터 — `Memory(Vec<u8>)` + `StructLayout{size, slots}` + `Value::Struct` offset 핸들, **resolve가 채운 slot 우선**(미해결은 이름 fallback) + **프레임은 arena `Vec<Value>` 위 `Frame{base,size}` 창**(resolve가 채운 `Var/LetStmt.slot`만 사용, 호출마다 창 재사용·할당 없음) + `FnItem.locals`(프레임 크기) + `Rc<FnItem>` 공유 + **`Call.fn_index`로 함수 테이블 직접 조회**(미해결은 이름 fallback) + `if`/`<`/재귀 호출 + 테스트 19개
 - samples: `twice.rs` · `dup-fn-macro.rs` (`def_fn!(foo)+fn foo` 중복 재현) · `struct.rs` (정의/리터럴/필드) · driver `--trace` 한 줄 요약
 - lowering: `fn name() { stmt* tail? }` + `if cond { } else { }` + `<` 비교 + 아이템 매크로 `def_fn!(foo)` + `struct`/리터럴/`p.x` 파서 + `if` 조건 no-struct-literal 제한 + 테스트 9개
-- resolve: 중복 fn 검사(미전개 Macro 제외) + **미정의 변수 에러**(`ResolveKind::UndefinedVar`, driver E0425) + **필드 참조 ident→slot**(`FieldAccess/FieldInit.slot`) + **지역변수 slot 배정 + `FnItem.locals`**(shadowing은 같은 slot 재사용) + 테스트 9개
+- resolve: 중복 fn 검사(미전개 Macro 제외) + **미정의 변수 에러**(`ResolveKind::UndefinedVar`, driver E0425) + **필드 참조 ident→slot**(`FieldAccess/FieldInit.slot`) + **지역변수 slot 배정 + `FnItem.locals`**(shadowing은 같은 slot 재사용) + **`Call.fn_index` 함수 테이블 번호**(eval 이름 해시 제거) + 테스트 10개
 - driver: lex → lowering → expand → resolve → eval (기본 `value:` 출력, `--ast`면 AST 덤프)
-- bench: `toy/bench/fib-bench.ts` — python/node/perl/lua/luajit/c/rust/rtoy fib 비교(미설치·빌드 실패는 SKIP, 컴파일 시간 제외, rtoy도 release) · min/median/max + warmup 1회 + `--md`/`--json=<path>`. fib(25) rtoy 19ms ≈ CPython의 1.1배
-- 테스트 총 55개 통과 (span 5/lexer 1/ast 1/lowering 9/resolve 9/expand 11/eval 19) · struct + slot 변형 + `if`/재귀(fib 실행 가능) + 프레임 섀도잉/재호출
+- bench: `toy/bench/fib-bench.ts` — python/node/perl/lua/luajit/c/rust/rtoy fib 비교(미설치·빌드 실패는 SKIP, 컴파일 시간 제외, rtoy도 release) · min/median/max + warmup 1회 + `--md`/`--json=<path>`. fib(25) rtoy 15ms ≈ CPython의 0.9배
+- 테스트 총 56개 통과 (span 5/lexer 1/ast 1/lowering 9/resolve 10/expand 11/eval 19) · struct + slot 변형 + `if`/재귀(fib 실행 가능) + 프레임 섀도잉/재호출
 - Span: lexer→span→ast→lowering 배선 완료
   - `Token.span`, `Item.span`, `Block.span`, `Expr.span` 필드 유지
   - lowering: Item/Block/Expr span 생성 및 연결
@@ -67,7 +67,7 @@
 - [x] Eval 성능 1: 변수 프레임 `HashMap` → 선형 스캔 `Vec<(String,Value)>` + `Rc<FnItem>` 공유(호출마다 AST clone 제거) — fib(25) release 160ms → 26ms
 - [x] Eval 성능 2: resolve가 지역변수 slot을 채워 `Vec<Value>` 인덱스 접근(이름 비교 제거) — `Frame=Vec<Value>` + `FnItem.locals`, fib(30) 215→176ms(-18%) · fib(25) rtoy 26.7→22ms
 - [x] Eval 성능 3: 호출 프레임 `Vec<Value>` 재사용(호출 깊이별 스택 + base offset) — 호출당 할당 제거, fib(25) release 22.0→19.0ms (1.33→1.12x CPython)
-- [ ] Eval 성능 4: callee를 fn index로 resolve가 심기 — 호출당 `HashMap<String,_>` 해시 제거
+- [x] Eval 성능 4: callee를 fn index로 resolve가 심기 — 호출당 `HashMap<String,_>` 해시 제거, fib(25) release 19.0→14.8ms (1.12→0.88x CPython)
 - [x] Resolve 엄격화: 미정의 변수는 resolve 에러(`ResolveKind`, driver E0425) · eval은 resolve된 slot만 사용(이름 fallback 제거) · resolve 미경유 AST는 `EvalError::UnresolvedLocal`로 거부 — eval 테스트도 실제 resolve를 거치게 함
 - [ ] Resolve: 선언 전 사용(`x; let x = 1;`)이 조용히 `()`가 되는 구멍 — 선언 순서 추적 또는 uninit 센티넬
 - [x] Lowering: `if` 조건 no-struct-literal 제한 (rustc 패리티) — `if x { .. }`가 struct literal로 오파싱되던 버그 수정 + 테스트 1개

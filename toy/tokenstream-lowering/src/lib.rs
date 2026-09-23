@@ -374,7 +374,7 @@ impl<'a> Lowering<'a> {
             self.bump();
             let (args, end) = self.parse_call_args()?;
             let span = Span::root(t.span.lo, end);
-            return Ok(Expr { kind: ExprKind::Call { callee: ident, args }, span });
+            return Ok(Expr { kind: ExprKind::Call { callee: ident, args, fn_index: None }, span });
         }
         if self.peek_is_punct('!') {
             self.bump();
@@ -596,7 +596,7 @@ mod tests {
                 let tail = f.body.tail.as_ref().unwrap();
                 assert_eq!(tail.span.snippet(src), "foo(x, 2)");
                 match &tail.kind {
-                    ExprKind::Call { callee, args } => {
+                    ExprKind::Call { callee, args, .. } => {
                         assert_eq!(callee.name, "foo");
                         assert_eq!(callee.span.snippet(src), "foo");
                         assert_eq!(args.len(), 2);

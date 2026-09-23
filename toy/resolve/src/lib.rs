@@ -70,6 +70,7 @@ pub fn resolve(krate: &mut Crate, src: &str) -> Result<(), Vec<ResolveError>> {
         errs.append(&mut e);
     }
     resolve_fields(krate);
+    resolve_calls(krate);
     if let Err(mut e) = resolve_locals(krate, src) {
         errs.append(&mut e);
     }
@@ -115,6 +116,79 @@ fn resolve_fields(krate: &mut Crate) {
         if let Some(tail) = &mut f.body.tail {
             patch_expr(tail, &types, &structs);
         }
+    }
+}
+
+/// 함수 이름 → 테이블 index (크레이트 순서 = eval `Vm::fns` 순서).
+fn fn_table(krate: &Crate) -> HashMap<String, u16> {
+    let mut map = HashMap::new();
+    let mut next: u16 = 0;
+    for item in &krate.items {
+        if matches!(&item.kind, ItemKind::Fn(_)) {
+            map.insert(item.name.name.clone(), next);
+            next += 1;
+        }
+    }
+    map
+}
+
+/// 모든 Call에 함수 테이블 번호를 심는다 (eval의 호출당 이름 해시 제거).
+fn resolve_calls(krate: &mut Crate) {
+    let table = fn_table(krate);
+    for item in &mut krate.items {
+        let ItemKind::Fn(f) = &mut item.kind else { continue };
+        patch_block_calls(&mut f.body, &table);
+    }
+}
+
+fn patch_block_calls(block: &mut Block, table: &HashMap<String, u16>) {
+    for stmt in &mut block.stmts {
+        match &mut stmt.kind {
+            StmtKind::Let(l) => {
+                if let Some(init) = &mut l.init {
+                    patch_calls(init, table);
+                }
+            }
+            StmtKind::Expr(e) => patch_calls(e, table),
+        }
+    }
+    if let Some(tail) = &mut block.tail {
+        patch_calls(tail, table);
+    }
+}
+
+/// Call 노드에 `fn_index`를 채운다 (모르는 이름은 None 유지 — 중복 fn은 별도 에러).
+fn patch_calls(expr: &mut Expr, table: &HashMap<String, u16>) {
+    match &mut expr.kind {
+        ExprKind::Call { callee, args, fn_index } => {
+            *fn_index = table.get(&callee.name).copied();
+            for arg in args {
+                patch_calls(arg, table);
+            }
+        }
+        ExprKind::If { cond, then_block, else_block } => {
+            patch_calls(cond, table);
+            patch_block_calls(then_block, table);
+            if let Some(block) = else_block {
+                patch_block_calls(block, table);
+            }
+        }
+        ExprKind::Binary { lhs, rhs, .. } => {
+            patch_calls(lhs, table);
+            patch_calls(rhs, table);
+        }
+        ExprKind::StructLiteral { fields, .. } => {
+            for field in fields {
+                patch_calls(&mut field.value, table);
+            }
+        }
+        ExprKind::FieldAccess { base, .. } => patch_calls(base, table),
+        ExprKind::Macro { args, .. } => {
+            for arg in args {
+                patch_calls(arg, table);
+            }
+        }
+        ExprKind::Int(_) | ExprKind::Var { .. } => {}
     }
 }
 
@@ -446,10 +520,23 @@ mod tests {
     }
 
     #[test]
+    fn calls_get_fn_index() {
+        // resolve가 Call에 함수 테이블 번호(크레이트 순서)를 심는다 — eval의 호출당 이름 해시 제거용.
+        let src = "fn main() { foo(1) } fn foo() { 2 }";
+        let mut krate = try_lower(&tokenize(src), src).unwrap();
+        assert!(resolve(&mut krate, src).is_ok());
+        let ItemKind::Fn(f) = &krate.items[0].kind else { panic!("fn이 아님") };
+        let tail = f.body.tail.as_ref().expect("tail 없음");
+        let ExprKind::Call { callee, fn_index, .. } = &tail.kind else { panic!("call이 아님") };
+        assert_eq!(callee.name, "foo");
+        assert_eq!(*fn_index, Some(1), "foo는 두 번째 Fn 아이템");
+    }
+
+    #[test]
     fn branch_local_joins_same_frame() {
         // 블록 스코프가 없어 분기 안 let도 같은 프레임 slot을 쓴다.
-        // (조건 끝이 식별자면 `x {`가 struct literal로 오파싱되므로 리터럴 조건을 쓴다)
-        let src = "fn main() { let x = 1; if 0 < 1 { let y = 2; y } else { x } }";
+        // (P1 이후 `if x {`도 조건 + 블록으로 파싱된다 — no-struct-literal 제한)
+        let src = "fn main() { let x = 1; if x { let y = 2; y } else { x } }";
         let mut krate = try_lower(&tokenize(src), src).unwrap();
         assert!(resolve(&mut krate, src).is_ok());
         let ItemKind::Fn(f) = &krate.items[0].kind else { panic!("fn이 아님") };

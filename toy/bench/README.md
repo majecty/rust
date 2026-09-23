@@ -1,7 +1,7 @@
 # bench — 언어별 재귀 fib 비교
 
 rtoy가 다른 언어 대비 어느 정도인지 보는 용도. AST 워킹 인터프리터라
-fib(25)에서 CPython의 약 1.1~1.3배 느리다(원인: AST 노드 순회 + 값마다 move).
+fib(25)에서 CPython과 비슷하거나 약간 빠르다(0.85~1.0배, 원인: AST 노드 순회 + 값마다 move).
 
 ## 실행
 ```sh
@@ -18,9 +18,11 @@ ts_run toy/bench/fib-bench.ts 25 3      # 또는: node toy/bench/fib-bench.ts 25
 
 ## 측정 결과 (fib(25), min, release 프로필)
 `--md`로 이 표를 재생성한다. min은 노이즈에 강하지만 median/max와 함께 볼 것.
-| c | rust | luajit | lua | python | node | rtoy | perl |
+| c | rust | luajit | lua | rtoy | python | node | perl |
 |---|---|---|---|---|---|---|---|
-| 1.8 | 2.3 | 2.7 | 5.7 | 17.0 | 18.9 | **19.0** | 33.5 |
+| 1.2 | 2.2 | 2.7 | 5.7 | **14.8** | 16.8 | 27.7 | 33.7 |
+
+node는 실행마다 편차가 크다(측정 중 18.9~33.3ms). rtoy는 14.0~14.8ms로 안정적이다.
 
 컨테이너 부하에 따라 수치가 흔들린다(rtoy 배수는 1.2~2x 범위). 상대 비교용으로만 볼 것.
 
@@ -32,6 +34,7 @@ ts_run toy/bench/fib-bench.ts 25 3      # 또는: node toy/bench/fib-bench.ts 25
 | eval: locals HashMap → 선형 스캔 `Vec`, `FnItem` clone → `Rc` | 171 ms | 26 ms |
 | eval: slot `Vec<Value>` 프레임 (성능 2) | - | 22 ms |
 | eval: 호출 프레임 arena 재사용 `Frame{base,size}` (성능 3) | - | 19 ms |
+| eval: `Call.fn_index`로 함수 테이블 조회 (성능 4) | - | 15 ms |
 
 초기(2026-09-22) 27배 수치는 debug 빌드 결과였고, 위 표는 최적화 후 재측정 값이다.
 

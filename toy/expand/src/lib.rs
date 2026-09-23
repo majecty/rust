@@ -95,12 +95,12 @@ pub fn expand_expr(e: rtoy_ast::Expr) -> Result<rtoy_ast::Expr, ExpandError> {
             lhs: Box::new(expand_expr(*lhs)?),
             rhs: Box::new(expand_expr(*rhs)?),
         },
-        ExprKind::Call { callee, args } => {
+        ExprKind::Call { callee, args, fn_index } => {
             let mut out = Vec::with_capacity(args.len());
             for a in args {
                 out.push(expand_expr(a)?);
             }
-            ExprKind::Call { callee, args: out }
+            ExprKind::Call { callee, args: out, fn_index }
         }
         other => other,
     };

@@ -255,23 +255,28 @@ fn frame_set(arena: &mut [Value], frame: Frame, name: &str, slot: Option<u16>, v
 
 /// 함수 정의 + layout + 단일 메모리.
 struct Vm {
+    /// 크레이트 순서 그대로의 함수 테이블 — resolve가 심은 `Call.fn_index`가 이 index다.
     /// 호출마다 `FnItem`을 clone하면 AST 전체가 복사되므로 Rc로 공유한다.
-    fns: HashMap<String, Rc<FnItem>>,
+    fns: Vec<Rc<FnItem>>,
+    /// 이름 → 테이블 index (main 조회와 resolve 미경유 AST의 fallback용).
+    by_name: HashMap<String, u16>,
     layouts: HashMap<String, StructLayout>,
     memory: Memory,
 }
 
 impl Vm {
     fn main_fn(&self) -> Result<Rc<FnItem>, EvalError> {
-        self.fns.get("main").cloned().ok_or_else(|| EvalError::NotAFunction("main".into()))
+        let index = self.by_name.get("main").ok_or_else(|| EvalError::NotAFunction("main".into()))?;
+        Ok(Rc::clone(&self.fns[*index as usize]))
     }
 
     fn register(krate: &Crate) -> Result<Vm, EvalError> {
-        let mut vm = Vm { fns: HashMap::new(), layouts: HashMap::new(), memory: Memory::default() };
+        let mut vm = Vm { fns: Vec::new(), by_name: HashMap::new(), layouts: HashMap::new(), memory: Memory::default() };
         for item in &krate.items {
             match &item.kind {
                 ItemKind::Fn(f) => {
-                    vm.fns.insert(item.name.name.clone(), Rc::new(f.clone()));
+                    vm.by_name.insert(item.name.name.clone(), vm.fns.len() as u16);
+                    vm.fns.push(Rc::new(f.clone()));
                 }
                 ItemKind::Struct(s) => {
                     vm.layouts.insert(item.name.name.clone(), StructLayout::of(s)?);
@@ -313,7 +318,7 @@ impl Vm {
                 let val = self.eval_expr(base, arena, frame)?;
                 self.read_field(&val, &field.name, *slot)
             }
-            ExprKind::Call { callee, args } => self.eval_call(callee, args, arena, frame),
+            ExprKind::Call { callee, args, fn_index } => self.eval_call(callee, args, *fn_index, arena, frame),
             ExprKind::If { cond, then_block, else_block } => {
                 self.eval_if(cond, then_block, else_block.as_deref(), arena, frame)
             }
@@ -443,6 +448,7 @@ impl Vm {
         &mut self,
         callee: &Ident,
         args: &[Expr],
+        fn_index: Option<u16>,
         arena: &mut Vec<Value>,
         frame: Frame,
     ) -> Result<Value, EvalError> {
@@ -458,12 +464,13 @@ impl Vm {
             return Ok(Value::Unit);
         }
 
-        // Rc 복제만 하므로 호출마다 함수 AST를 clone하지 않는다.
-        let f = self
-            .fns
-            .get(&callee.name)
-            .cloned()
-            .ok_or_else(|| EvalError::NotAFunction(callee.name.clone()))?;
+        // resolve가 심은 테이블 번호로 바로 찾는다 (이름 해시 제거).
+        // 미해결(resolve 미경유)이면 이름으로 fallback한다.
+        let f = match fn_index {
+            Some(i) => self.fns.get(i as usize).cloned(),
+            None => self.by_name.get(&callee.name).and_then(|i| self.fns.get(*i as usize)).cloned(),
+        }
+        .ok_or_else(|| EvalError::NotAFunction(callee.name.clone()))?;
 
         // 호출마다 새 Vec을 만들지 않고, 부모 프레임 바로 위 창을 재사용한다.
         let locals = push_frame(arena, frame.child(f.locals));
@@ -788,7 +795,7 @@ mod tests {
 
     fn call(name: &str, arg: Expr) -> Expr {
         let s = Span::root(0, 0);
-        Expr { kind: ExprKind::Call { callee: Ident { name: name.into(), span: s }, args: vec![arg] }, span: s }
+        Expr { kind: ExprKind::Call { callee: Ident { name: name.into(), span: s }, args: vec![arg], fn_index: None }, span: s }
     }
 
     fn sub(l: Expr, r: Expr) -> Expr {

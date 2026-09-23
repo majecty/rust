@@ -7,15 +7,15 @@
 - 파이프라인: 읽기 → lex → lowering → expand → resolve → eval (기본 `value:` 출력)
 
 ## 2. crate별 상태
-(검증: `cd toy && cargo test -p <crate> --lib`, 총 49개 통과)
+(검증: `cd toy && cargo test -p <crate> --lib`, 총 56개 통과)
 
 - `rtoy-lexer`: char_indices tokenize (Ident/Int/Punct/Whitespace/Comment) · 테스트 1
 - `rtoy-span`: `Span{lo,hi,ctxt,parent}` + `SyntaxContext/ExpnId/ExpnData` + `root/new/chain/same_var` · 테스트 5
 - `rtoy-ast`: Crate/Item/Fn/Block/Stmt(`Expr`/`Let`)/Expr(`Int`/`Var`/`Call`/`Macro`/`StructLiteral`/`FieldAccess`/`If`)/`MacroDef`/`StructItem` · 테스트 1
-- `rtoy-tokenstream-lowering`: tokens → Crate (`fn`/`struct`/`let`/이항연산/`if`+`<`/매크로 호출) · 테스트 8
+- `rtoy-tokenstream-lowering`: tokens → Crate (`fn`/`struct`/`let`/이항연산/`if`+`<`/매크로 호출, `if` 조건 no-struct-literal 제한) · 테스트 9
 - `rtoy-expand`: `macro_rules!` 패턴매칭·전개 + `twice!`/`def_fn!` · 테스트 11
-- `rtoy-resolve`: 중복 fn 검사(미전개 Macro 제외) + 필드 참조 `ident → slot` 제자리 변형(`&mut Crate`) · 테스트 5
-- `rtoy-eval`: 단일 byte array 메모리 인터프리터 — `Memory(Vec<u8>)` + `StructLayout{size, slots}`, `Value::Struct`는 offset 핸들, 필드는 byte offset으로 읽고 씀. resolve가 채운 slot 우선(미해결만 이름 fallback), 변수 프레임은 선형 스캔 `Vec<(String,Value)>` + `Rc<FnItem>` 공유(호출마다 AST clone 안 함), `if`/`<`/재귀 지원 · 테스트 16
+- `rtoy-resolve`: 중복 fn 검사(미전개 Macro 제외) + 필드 참조 `ident → slot` 제자리 변형(`&mut Crate`) + 지역변수 slot·`Call.fn_index` 배정 · 테스트 10
+- `rtoy-eval`: 단일 byte array 메모리 인터프리터 — `Memory(Vec<u8>)` + `StructLayout{size, slots}`, `Value::Struct`는 offset 핸들, 필드는 byte offset으로 읽고 씀. resolve가 채운 slot 우선(미해결만 이름 fallback), 프레임은 arena `Vec<Value>` 위 `Frame{base,size}` 창(호출마다 재사용·할당 없음), callee는 `Call.fn_index`로 직접 조회, `Rc<FnItem>` 공유(호출마다 AST clone 안 함), `if`/`<`/재귀 지원 · 테스트 19
 - `rtoy-driver`: `--lex`/`--ast`/`--trace` + eval 배선(`Runtime::format_value`)
 - `toy/bench/fib-bench.ts`: 언어별 재귀 fib 비교(rtoy 포함, 컴파일 시간 제외, lua/luajit는 없으면 소스 빌드)
 

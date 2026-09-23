@@ -43,7 +43,7 @@ fn expr_sum(e: &rtoy_ast::Expr, src: &str) -> String {
     let kind = match &e.kind {
         rtoy_ast::ExprKind::Int(n) => format!("Int({n})"),
         rtoy_ast::ExprKind::Var { name, .. } => format!("Var({})", name.name),
-        rtoy_ast::ExprKind::Call { callee, args } => {
+        rtoy_ast::ExprKind::Call { callee, args, .. } => {
             format!("Call({}/{})", callee.name, args.len())
         }
         rtoy_ast::ExprKind::Binary { op, .. } => format!("Binary({op:?})"),
