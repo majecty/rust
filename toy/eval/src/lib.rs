@@ -8,6 +8,9 @@ use rtoy_ast::*;
 use std::collections::HashMap;
 use std::rc::Rc;
 
+mod mir;
+pub use mir::eval_mir;
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum EvalError {
     /// resolve를 거치지 않았거나 resolve 결과와 프레임이 어긋난 지역변수.
@@ -87,22 +90,32 @@ pub struct FieldSlot {
 }
 
 impl StructLayout {
+    /// (필드 이름, 크기) 목록에서 배치를 만든다 (AST eval / MIR eval 공용).
     /// 필드 선언 순서대로 offset을 누적한다 (natural alignment, padding 포함).
-    fn of(item: &StructItem) -> Result<StructLayout, EvalError> {
+    fn from_sizes(fields: &[(&str, usize)]) -> StructLayout {
         let mut size = 0usize;
         let mut slots = Vec::new();
         let mut names = Vec::new();
         let mut by_name = HashMap::new();
-        for field in &item.fields {
-            let fsize = type_size(&field.ty.name)?;
-            let align = fsize.min(8);
+        for (name, fsize) in fields {
+            let align = (*fsize).clamp(1, 8);
             size = (size + align - 1) / align * align;
-            by_name.insert(field.name.name.clone(), slots.len() as u16);
-            names.push(field.name.name.clone());
-            slots.push(FieldSlot { offset: size, size: fsize });
-            size += fsize;
+            by_name.insert((*name).to_string(), slots.len() as u16);
+            names.push((*name).to_string());
+            slots.push(FieldSlot { offset: size, size: *fsize });
+            size += *fsize;
         }
-        Ok(StructLayout { size, slots, names, by_name })
+        StructLayout { size, slots, names, by_name }
+    }
+
+    /// 필드 선언 순서대로 offset을 누적한다 (natural alignment, padding 포함).
+    fn of(item: &StructItem) -> Result<StructLayout, EvalError> {
+        let sizes = item
+            .fields
+            .iter()
+            .map(|f| Ok((f.name.name.as_str(), type_size(&f.ty.name)?)))
+            .collect::<Result<Vec<_>, EvalError>>()?;
+        Ok(StructLayout::from_sizes(&sizes))
     }
 
     /// slot 번호로 필드 위치를 얻는다 (resolve가 채운 번호의 조회 경로).
@@ -253,6 +266,25 @@ fn frame_set(arena: &mut [Value], frame: Frame, name: &str, slot: Option<u16>, v
     Ok(())
 }
 
+/// 이항 연산 적용 (AST eval / MIR eval 공용).
+pub(crate) fn apply_binop(op: &BinOp, l: &Value, r: &Value) -> Result<Value, EvalError> {
+    match (op, l, r) {
+        (BinOp::Add, Value::Int(a), Value::Int(b)) => Ok(Value::Int(a + b)),
+        (BinOp::Sub, Value::Int(a), Value::Int(b)) => Ok(Value::Int(a - b)),
+        (BinOp::Mul, Value::Int(a), Value::Int(b)) => Ok(Value::Int(a * b)),
+        (BinOp::Lt, Value::Int(a), Value::Int(b)) => Ok(Value::Int((a < b) as i64)),
+        (BinOp::Div, Value::Int(a), Value::Int(b)) => match b {
+            0 => Err(EvalError::NotImplemented("division by zero".into())),
+            _ => Ok(Value::Int(a / b)),
+        },
+        (BinOp::Mod, Value::Int(a), Value::Int(b)) => match b {
+            0 => Err(EvalError::NotImplemented("mod by zero".into())),
+            _ => Ok(Value::Int(a % b)),
+        },
+        _ => Err(EvalError::NotImplemented(format!("binary {:?} on non-int", op))),
+    }
+}
+
 /// 함수 정의 + layout + 단일 메모리.
 struct Vm {
     /// 크레이트 순서 그대로의 함수 테이블 — resolve가 심은 `Call.fn_index`가 이 index다.
@@ -336,21 +368,7 @@ impl Vm {
     ) -> Result<Value, EvalError> {
         let l = self.eval_expr(lhs, arena, frame)?;
         let r = self.eval_expr(rhs, arena, frame)?;
-        match (op, &l, &r) {
-            (BinOp::Add, Value::Int(a), Value::Int(b)) => Ok(Value::Int(a + b)),
-            (BinOp::Sub, Value::Int(a), Value::Int(b)) => Ok(Value::Int(a - b)),
-            (BinOp::Mul, Value::Int(a), Value::Int(b)) => Ok(Value::Int(a * b)),
-            (BinOp::Lt, Value::Int(a), Value::Int(b)) => Ok(Value::Int((a < b) as i64)),
-            (BinOp::Div, Value::Int(a), Value::Int(b)) => match b {
-                0 => Err(EvalError::NotImplemented("division by zero".into())),
-                _ => Ok(Value::Int(a / b)),
-            },
-            (BinOp::Mod, Value::Int(a), Value::Int(b)) => match b {
-                0 => Err(EvalError::NotImplemented("mod by zero".into())),
-                _ => Ok(Value::Int(a % b)),
-            },
-            _ => Err(EvalError::NotImplemented(format!("binary {:?} on non-int", op))),
-        }
+        apply_binop(op, &l, &r)
     }
 
     /// if 식: 조건이 0이 아니면 then, 0이면 else (else 없으면 Unit).

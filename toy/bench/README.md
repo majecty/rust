@@ -18,11 +18,21 @@ ts_run toy/bench/fib-bench.ts 25 3      # 또는: node toy/bench/fib-bench.ts 25
 
 ## 측정 결과 (fib(25), min, release 프로필)
 `--md`로 이 표를 재생성한다. min은 노이즈에 강하지만 median/max와 함께 볼 것.
-| c | rust | luajit | lua | rtoy | python | node | perl |
-|---|---|---|---|---|---|---|---|
-| 1.2 | 2.2 | 2.7 | 5.7 | **14.8** | 16.8 | 27.7 | 33.7 |
+| c | rust | luajit | lua | rtoy | python | node | perl | rtoy-mir |
+|---|---|---|---|---|---|---|---|---|
+| 1.2 | 2.2 | 2.7 | 5.7 | **14.8** | 16.8 | 27.7 | 33.7 | 37.0 |
 
 node는 실행마다 편차가 크다(측정 중 18.9~33.3ms). rtoy는 14.0~14.8ms로 안정적이다.
+
+### rtoy-mir — 최적화 없는 MIR 인터프리터
+`--mir-eval`로 돌리는 MIR 인터프리터(`rtoy-eval::eval_mir`)는 **AST eval보다 느리다**(fib(25) 37ms vs 16ms).
+이유는 mir-opt 패스가 없어 MIR이 naive 번역이기 때문 — `fib(n-1)` 한 번에 temp/copy 5개가 붙는다.
+```
+_7 = copy _1;  _8 = const 1;  _6 = copy _7 - copy _8;  _5 = fib(copy _6);
+_11 = copy _1; _12 = const 2; _10 = copy _11 - copy _12; _9 = fib(copy _10);
+_0 = copy _5 + copy _9;
+```
+copy propagation·temp 제거를 넣으면 AST eval 수준을 넘길 것으로 기대한다(다음 단계).
 
 컨테이너 부하에 따라 수치가 흔들린다(rtoy 배수는 1.2~2x 범위). 상대 비교용으로만 볼 것.
 
@@ -42,3 +52,4 @@ node는 실행마다 편차가 크다(측정 중 18.9~33.3ms). rtoy는 14.0~14.8
 - argv/stdin이 없어 `n`을 소스에 박는다(`{N}` 치환). 소스는 `$TMPDIR/fibbench/fib.rtoy.rs`.
 - 파라미터 AST가 없어 인자는 선두 `let` 자리 관례를 쓴다: `fn fib() { let n = 0; if n < 2 { n } else { ... } }`.
 - 드라이버 바이너리는 `$TMPDIR/rtoy-bench/release/rtoy-driver`로 빌드해 직접 실행한다(`toy/run`은 매번 cargo를 거친다).
+- `rtoy-mir` 행은 같은 바이너리를 `--mir-eval`로 실행한 값이다(같은 소스, 같은 프레임 구현).

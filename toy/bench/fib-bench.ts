@@ -77,7 +77,7 @@ fn main() {
 `],
 };
 
-type Target = { lang: string; tool: string; script: string; build?: string[]; absPath?: boolean; prefix?: string; runs?: number; skip?: string };
+type Target = { lang: string; tool: string; script: string; build?: string[]; absPath?: boolean; prefix?: string; runs?: number; preArgs?: string[]; skip?: string };
 
 function luaBin(kind: "lua" | "luajit"): string {
   if (kind === "luajit") return join(LUA_DIR, "LuaJIT", "src", "luajit");
@@ -156,7 +156,7 @@ function mdTable(rows: Row[], base: number, baseLabel: string): string {
 function prepare(target: Target, n: number): { cmd: string; args: string[]; skip: string } {
   if (!target.build) {
     const arg = target.absPath ? join(DIR, target.script) : target.script;
-    const args = target.lang === "rtoy" ? [arg] : [arg, String(n)];
+    const args = target.lang.startsWith("rtoy") ? [...(target.preArgs ?? []), arg] : [arg, String(n)];
     return { cmd: target.tool, args, skip: target.skip ?? "" };
   }
   const bin = `fib-${target.lang}`;
@@ -198,6 +198,7 @@ function main(): void {
     { lang: "rust", tool: RUSTC, script: "fib.rs", build: ["-O"] },
     { lang: "go", tool: "go", script: "fib.go", build: ["build"] },
     { lang: "rtoy", tool: RTOY_BIN, script: "fib.rtoy.rs", absPath: true, prefix: "value: ", skip: rtoyOk ? "" : `cargo build 실패: ${(rtoyBuild.stderr ?? "").slice(0, 60)}` },
+    { lang: "rtoy-mir", tool: RTOY_BIN, script: "fib.rtoy.rs", absPath: true, prefix: "value: ", preArgs: ["--mir-eval"], skip: rtoyOk ? "" : `cargo build 실패: ${(rtoyBuild.stderr ?? "").slice(0, 60)}` },
   ];
 
   console.log(`=== fib(${n}) min/median/max ms, warmup 1 + x${runs} runs, expected=${expect} ===`);
@@ -224,7 +225,7 @@ function main(): void {
   const baseLabel = baseRow?.lang ?? "-";
   for (const r of rows) {
     const ratio = Number.isFinite(r.min) ? `${(r.min / base).toFixed(2)}x ${baseLabel}` : "-";
-    console.log(`${r.lang.padEnd(7)} ${fmt(r.min).padStart(8)} ${fmt(r.median).padStart(8)} ${fmt(r.max).padStart(8)}  ${ratio.padStart(12)}  ${r.note}`);
+    console.log(`${r.lang.padEnd(8)} ${fmt(r.min).padStart(8)} ${fmt(r.median).padStart(8)} ${fmt(r.max).padStart(8)}  ${ratio.padStart(12)}  ${r.note}`);
   }
   if (wantMd) console.log(`\n${mdTable(rows, base, baseLabel)}`);
   if (jsonPath) writeFileSync(jsonPath, JSON.stringify({ n, runs, expected: expect, base: baseLabel, rows }, null, 2));

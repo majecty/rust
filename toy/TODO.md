@@ -17,7 +17,7 @@
 - [로드맵](docs/roadmap.md) — 다음 단계·이슈·위키
 
 ## 3. 현재 상태 요약
-- 워크스페이스 members에 toy 8개 crate 등록 (ast/driver/eval/expand/lexer/span/tokenstream-lowering/resolve)
+- 워크스페이스 members에 toy 9개 crate 등록 (ast/driver/eval/expand/lexer/mir/span/tokenstream-lowering/resolve)
 - span: `Span{lo,hi,ctxt,parent}` + `SyntaxContext/ExpnId/ExpnData` + `root/copied_arg/fresh_child/chain/same_var` + 테스트 5개
 - lexer: char_indices tokenize + `Comment`(`//`~개행전) + 테스트 1개 (`lexer→ast` 역전 해소)
 - ast: Crate/Item/Fn/Block/Stmt(`Expr`/`Let`)/`LetStmt`/Expr(`Int`/`Var{name,slot}`/`Call`/`Macro`/`StructLiteral`/`FieldAccess`/`If`)/이항연산(`+ - * / %`·`<`)/`MacroDef`/`StructItem`/`FieldInit` + 테스트 1개
@@ -26,9 +26,11 @@
 - samples: `twice.rs` · `dup-fn-macro.rs` (`def_fn!(foo)+fn foo` 중복 재현) · `struct.rs` (정의/리터럴/필드) · driver `--trace` 한 줄 요약
 - lowering: `fn name() { stmt* tail? }` + `if cond { } else { }` + `<` 비교 + 아이템 매크로 `def_fn!(foo)` + `struct`/리터럴/`p.x` 파서 + `if` 조건 no-struct-literal 제한 + 테스트 9개
 - resolve: 중복 fn 검사(미전개 Macro 제외) + **미정의 변수 에러**(`ResolveKind::UndefinedVar`, driver E0425) + **필드 참조 ident→slot**(`FieldAccess/FieldInit.slot`) + **지역변수 slot 배정 + `FnItem.locals`**(shadowing은 같은 slot 재사용) + **`Call.fn_index` 함수 테이블 번호**(eval 이름 해시 제거) + 테스트 10개
+- mir: `toy/mir` — AST(resolve 후) → basic block CFG MIR. `Body{locals, arg_locals, entry, blocks}` + `BasicBlock{stmts, terminator}` + `Place{local, proj}`/`Rvalue`/`Operand` + `TerminatorKind{Goto/SwitchInt/Call/Return}` (rustc `rustc_middle/mir` 부분집합). `if`→`SwitchInt`, 최상위 `let`→prologue 블록(인자 n개면 `bb n`부터), `--mir` 덤프 + 테스트 7개
+- mir-eval: `rtoy-eval::eval_mir` — MIR CFG를 선형 스캔(AST eval의 arena/`Frame`/`Value`/`Memory` 재사용) + `--mir-eval` + AST eval과 교차검증(samples/fib/print/에러샘플 동일). **최적화 패스가 없어 naive MIR은 AST eval보다 느림** (fib(25) 37ms vs 16ms) — mir-opt가 다음 단계
 - driver: lex → lowering → expand → resolve → eval (기본 `value:` 출력, `--ast`면 AST 덤프)
-- bench: `toy/bench/fib-bench.ts` — python/node/perl/lua/luajit/c/rust/rtoy fib 비교(미설치·빌드 실패는 SKIP, 컴파일 시간 제외, rtoy도 release) · min/median/max + warmup 1회 + `--md`/`--json=<path>`. fib(25) rtoy 15ms ≈ CPython의 0.9배
-- 테스트 총 56개 통과 (span 5/lexer 1/ast 1/lowering 9/resolve 10/expand 11/eval 19) · struct + slot 변형 + `if`/재귀(fib 실행 가능) + 프레임 섀도잉/재호출
+- bench: `toy/bench/fib-bench.ts` — python/node/perl/lua/luajit/c/rust/rtoy/rtoy-mir fib 비교(미설치·빌드 실패는 SKIP, 컴파일 시간 제외, rtoy도 release) · min/median/max + warmup 1회 + `--md`/`--json=<path>`. fib(25) rtoy 15ms ≈ CPython의 0.9배, rtoy-mir 37ms
+- 테스트 총 63개 통과 (span 5/lexer 1/ast 1/lowering 9/resolve 10/expand 11/mir 7/eval 19) · struct + slot 변형 + `if`/재귀(fib 실행 가능) + 프레임 섀도잉/재호출
 - Span: lexer→span→ast→lowering 배선 완료
   - `Token.span`, `Item.span`, `Block.span`, `Expr.span` 필드 유지
   - lowering: Item/Block/Expr span 생성 및 연결
@@ -73,10 +75,13 @@
 - [x] Lowering: `if` 조건 no-struct-literal 제한 (rustc 패리티) — `if x { .. }`가 struct literal로 오파싱되던 버그 수정 + 테스트 1개
 - [ ] Lowering: `fn` 파라미터 AST 도입해 `let` 자리 관례 제거
 - [ ] Resolve 진단: 매크로 생성 이름의 `expanded from def_fn! here` note + snippet이 호출문 전체를 보여줄지 결정
-- [x] Span/docs: `docs/status.md` 8-crate 현행화 (2026-09-22)
+- [x] Span/docs: `docs/status.md` 9-crate 현행화
 - [ ] Driver: `--ast`가 resolve 이후(변형된) 트리임을 표기하고 `--ast-raw` 분리 고민
 - [ ] Resolve: 제어흐름(`if`·재귀) 도입 시 지역변수 타입 추적을 블록/분기 인식으로 확장
-- [ ] HIR 스텁: AST → 간단 HIR ([상세](docs/roadmap.md))
+- [x] MIR: `toy/mir` crate — AST(resolve 후) → basic block CFG (rustc `rustc_middle/mir` 부분집합) + `--mir` 덤프 + 테스트 7개
+- [x] MIR eval: `rtoy-eval::eval_mir` — CFG 선형 스캔(arena/`Frame` 재사용) + `--mir-eval` + AST eval과 교차검증(samples/fib/print/에러샘플)
+- [ ] MIR opt: 불필요 temp/copy 제거·copy propagation·상수 폴딩 — naive MIR이 AST eval보다 느린 원인(fib(25) 37ms vs AST 16ms)
+- [ ] MIR: `--mir` 덤프를 샘플별 스냅샷 테스트로 고정
 - [ ] Eval: 구조체 중첩 필드 (layout 안에 하위 layout offset)
 - [x] Bench: `toy/bench/fib-bench.ts` — 재귀 fib로 python/node/perl/lua/luajit/c/rust/rtoy 비교 (ruby/php/go는 미설치면 SKIP)
 - [x] Bench: 통계 보강 — min/median/max + warmup 1회 + 검증값 첫 run 고정 + `--md`/`--json=<path>` (rtoy도 runs 3으로 통일)

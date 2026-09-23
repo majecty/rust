@@ -4,7 +4,8 @@
 - [ ] Lexer 보강: 주석 토큰 + pull Cursor 전환 검토
 - [ ] AST 확장: Let/Var/Call + 이항 연산
 - [ ] Lowering 확장: 다중 stmt 파싱
-- [ ] HIR 스텁: AST → 간단 HIR (`toy/hir` 신설 또는 driver 내부)
+- [x] MIR 스텁: AST → basic block CFG MIR (`toy/mir` 신설, HIR 대신 rustc mir 쪽으로 구체화)
+- [ ] MIR opt: temp/copy 제거·copy propagation (naive MIR이 AST eval보다 느림)
 - [ ] 위키 연동: 단계 완료마다 `[[rust-*]]` 정리
 - [ ] 테스트 보강: crate별 케이스 추가
 
@@ -18,3 +19,4 @@
 - [[rust-tokenstream]]
 - [[rust-some-trait-lowering]]
 - [[rust-stable_hash]]
+- [[rust-rtoy-mir]] (MIR 데이터·lowering·eval)
