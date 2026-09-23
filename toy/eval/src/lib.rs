@@ -186,45 +186,70 @@ pub fn eval_crate(krate: &Crate) -> Result<Runtime, EvalError> {
     let mut vm = Vm::register(krate)?;
     // Rc만 복제한다 (호출마다 AST를 clone하지 않기 위함).
     let main_fn = vm.main_fn()?;
-    let mut frame = new_frame(main_fn.locals);
-    let value = vm.eval_block(&main_fn.body, &mut frame)?;
+    // 실행 스택: 최대 호출 깊이만큼 자라고, 호출마다 창을 잘라 재사용한다 (호출당 할당 없음).
+    let mut arena = vec![Value::Unit; main_fn.locals as usize];
+    let value = vm.eval_block(&main_fn.body, &mut arena, Frame::root(main_fn.locals))?;
     Ok(Runtime { value, memory: vm.memory, layouts: vm.layouts })
 }
 
-/// 지역변수 프레임 — resolve가 배정한 slot 번호가 그대로 index다.
-/// 크기는 resolve가 채운 `FnItem.locals`에서 나온다 (이름표를 들고 다니지 않는다).
-type Frame = Vec<Value>;
-
-/// 프레임을 slot 수만큼 `Value::Unit`으로 채워 만든다.
-fn new_frame(locals: u16) -> Frame {
-    vec![Value::Unit; locals as usize]
+/// 지역변수 프레임 창 — `arena[base .. base+size]`가 이 프레임이다.
+/// resolve가 배정한 slot 번호가 `base` 기준 상대 index이고, 크기는 `FnItem.locals`에서 온다.
+#[derive(Debug, Clone, Copy)]
+struct Frame {
+    base: usize,
+    size: usize,
 }
 
-/// slot 번호를 프레임 index로 바꾼다.
+impl Frame {
+    /// 호출 스택 맨 아래 프레임 (main).
+    fn root(locals: u16) -> Frame {
+        Frame { base: 0, size: locals as usize }
+    }
+
+    /// 이 프레임 바로 위에 붙는 callee 프레임 (스택 규율: base는 부모 끝).
+    fn child(&self, locals: u16) -> Frame {
+        Frame { base: self.base + self.size, size: locals as usize }
+    }
+}
+
+/// callee 창을 준비한다 — arena를 필요하면 늘리고, 창을 `Value::Unit`으로 되돌린다.
+/// 재사용 시 이전 호출의 값이 남지 않도록 반드시 초기화한다.
+fn push_frame(arena: &mut Vec<Value>, frame: Frame) -> Frame {
+    let end = frame.base + frame.size;
+    if arena.len() < end {
+        arena.resize(end, Value::Unit);
+    }
+    for v in &mut arena[frame.base..end] {
+        *v = Value::Unit;
+    }
+    frame
+}
+
+/// slot 번호를 프레임 안 상대 index로 바꾼다.
 /// resolve를 거치지 않은 AST는 slot이 없거나 범위를 벗어나므로 조용히 넘기지 않는다.
-fn slot_index(frame: &Frame, name: &str, slot: Option<u16>) -> Result<usize, EvalError> {
+fn slot_index(frame: Frame, name: &str, slot: Option<u16>) -> Result<usize, EvalError> {
     let index = slot.ok_or_else(|| {
         EvalError::UnresolvedLocal(format!("`{name}` has no slot (resolve not run)"))
     })? as usize;
-    if index >= frame.len() {
+    if index >= frame.size {
         return Err(EvalError::UnresolvedLocal(format!(
             "`{name}` slot {index} out of range (frame has {})",
-            frame.len()
+            frame.size
         )));
     }
     Ok(index)
 }
 
 /// 프레임에서 값을 읽는다.
-fn frame_get(frame: &Frame, name: &str, slot: Option<u16>) -> Result<Value, EvalError> {
+fn frame_get(arena: &[Value], frame: Frame, name: &str, slot: Option<u16>) -> Result<Value, EvalError> {
     let index = slot_index(frame, name, slot)?;
-    Ok(frame[index].clone())
+    Ok(arena[frame.base + index].clone())
 }
 
 /// 프레임에 값을 쓴다 (같은 이름 재선언은 같은 slot을 덮어쓴다 — 선형 스캔과 같은 의미).
-fn frame_set(frame: &mut Frame, name: &str, slot: Option<u16>, value: Value) -> Result<(), EvalError> {
+fn frame_set(arena: &mut [Value], frame: Frame, name: &str, slot: Option<u16>, value: Value) -> Result<(), EvalError> {
     let index = slot_index(frame, name, slot)?;
-    frame[index] = value;
+    arena[frame.base + index] = value;
     Ok(())
 }
 
@@ -257,40 +282,40 @@ impl Vm {
         Ok(vm)
     }
 
-    fn eval_block(&mut self, block: &Block, frame: &mut Frame) -> Result<Value, EvalError> {
+    fn eval_block(&mut self, block: &Block, arena: &mut Vec<Value>, frame: Frame) -> Result<Value, EvalError> {
         for stmt in &block.stmts {
             match &stmt.kind {
                 StmtKind::Let(let_stmt) => {
                     let val = match &let_stmt.init {
-                        Some(init) => self.eval_expr(init, frame)?,
+                        Some(init) => self.eval_expr(init, arena, frame)?,
                         None => Value::Int(0),
                     };
-                    frame_set(frame, &let_stmt.name.name, let_stmt.slot, val)?;
+                    frame_set(arena, frame, &let_stmt.name.name, let_stmt.slot, val)?;
                 }
                 StmtKind::Expr(expr) => {
-                    self.eval_expr(expr, frame)?;
+                    self.eval_expr(expr, arena, frame)?;
                 }
             }
         }
         match &block.tail {
-            Some(tail) => self.eval_expr(tail, frame),
+            Some(tail) => self.eval_expr(tail, arena, frame),
             None => Ok(Value::Unit),
         }
     }
 
-    fn eval_expr(&mut self, expr: &Expr, frame: &mut Frame) -> Result<Value, EvalError> {
+    fn eval_expr(&mut self, expr: &Expr, arena: &mut Vec<Value>, frame: Frame) -> Result<Value, EvalError> {
         match &expr.kind {
             ExprKind::Int(n) => Ok(Value::Int(*n)),
-            ExprKind::Var { name, slot } => frame_get(frame, &name.name, *slot),
-            ExprKind::Binary { op, lhs, rhs } => self.eval_binary(op, lhs, rhs, frame),
-            ExprKind::StructLiteral { name, fields } => self.build_struct(name, fields, frame),
+            ExprKind::Var { name, slot } => frame_get(arena, frame, &name.name, *slot),
+            ExprKind::Binary { op, lhs, rhs } => self.eval_binary(op, lhs, rhs, arena, frame),
+            ExprKind::StructLiteral { name, fields } => self.build_struct(name, fields, arena, frame),
             ExprKind::FieldAccess { base, field, slot } => {
-                let val = self.eval_expr(base, frame)?;
+                let val = self.eval_expr(base, arena, frame)?;
                 self.read_field(&val, &field.name, *slot)
             }
-            ExprKind::Call { callee, args } => self.eval_call(callee, args, frame),
+            ExprKind::Call { callee, args } => self.eval_call(callee, args, arena, frame),
             ExprKind::If { cond, then_block, else_block } => {
-                self.eval_if(cond, then_block, else_block.as_deref(), frame)
+                self.eval_if(cond, then_block, else_block.as_deref(), arena, frame)
             }
             ExprKind::Macro { .. } => Err(EvalError::NotImplemented("macro call (not expanded)".into())),
         }
@@ -301,10 +326,11 @@ impl Vm {
         op: &BinOp,
         lhs: &Expr,
         rhs: &Expr,
-        frame: &mut Frame,
+        arena: &mut Vec<Value>,
+        frame: Frame,
     ) -> Result<Value, EvalError> {
-        let l = self.eval_expr(lhs, frame)?;
-        let r = self.eval_expr(rhs, frame)?;
+        let l = self.eval_expr(lhs, arena, frame)?;
+        let r = self.eval_expr(rhs, arena, frame)?;
         match (op, &l, &r) {
             (BinOp::Add, Value::Int(a), Value::Int(b)) => Ok(Value::Int(a + b)),
             (BinOp::Sub, Value::Int(a), Value::Int(b)) => Ok(Value::Int(a - b)),
@@ -329,14 +355,15 @@ impl Vm {
         cond: &Expr,
         then_block: &Block,
         else_block: Option<&Block>,
-        frame: &mut Frame,
+        arena: &mut Vec<Value>,
+        frame: Frame,
     ) -> Result<Value, EvalError> {
-        match self.eval_expr(cond, frame)? {
+        match self.eval_expr(cond, arena, frame)? {
             Value::Int(0) => match else_block {
-                Some(block) => self.eval_block(block, frame),
+                Some(block) => self.eval_block(block, arena, frame),
                 None => Ok(Value::Unit),
             },
-            Value::Int(_) => self.eval_block(then_block, frame),
+            Value::Int(_) => self.eval_block(then_block, arena, frame),
             other => Err(EvalError::NotImplemented(format!(
                 "if condition must be int, got {other:?}"
             ))),
@@ -348,7 +375,8 @@ impl Vm {
         &mut self,
         name: &Ident,
         fields: &[FieldInit],
-        frame: &mut Frame,
+        arena: &mut Vec<Value>,
+        frame: Frame,
     ) -> Result<Value, EvalError> {
         let layout = self
             .layouts
@@ -358,7 +386,7 @@ impl Vm {
         let offset = self.memory.alloc(layout.size);
         for field in fields {
             let slot = self.slot_of_field(&layout, &name.name, field)?;
-            let Value::Int(n) = self.eval_expr(&field.value, frame)? else {
+            let Value::Int(n) = self.eval_expr(&field.value, arena, frame)? else {
                 return Err(EvalError::NotImplemented(format!(
                     "non-int field {} (구조체 중첩 미지원)",
                     field.name.name
@@ -415,12 +443,13 @@ impl Vm {
         &mut self,
         callee: &Ident,
         args: &[Expr],
-        frame: &mut Frame,
+        arena: &mut Vec<Value>,
+        frame: Frame,
     ) -> Result<Value, EvalError> {
         if callee.name == "print" {
             let vals: Vec<Value> = args
                 .iter()
-                .map(|a| self.eval_expr(a, frame))
+                .map(|a| self.eval_expr(a, arena, frame))
                 .collect::<Result<_, _>>()?;
             for v in &vals {
                 print!("{} ", format_value(&self.memory, &self.layouts, v));
@@ -436,15 +465,16 @@ impl Vm {
             .cloned()
             .ok_or_else(|| EvalError::NotAFunction(callee.name.clone()))?;
 
-        let mut locals = new_frame(f.locals);
-        self.bind_args(&f, args, frame, &mut locals)?;
+        // 호출마다 새 Vec을 만들지 않고, 부모 프레임 바로 위 창을 재사용한다.
+        let locals = push_frame(arena, frame.child(f.locals));
+        self.bind_args(&f, args, arena, frame, locals)?;
         for stmt in &f.body.stmts {
             if let StmtKind::Expr(expr) = &stmt.kind {
-                self.eval_expr(expr, &mut locals)?;
+                self.eval_expr(expr, arena, locals)?;
             }
         }
         match &f.body.tail {
-            Some(tail) => self.eval_expr(tail, &mut locals),
+            Some(tail) => self.eval_expr(tail, arena, locals),
             None => Ok(Value::Unit),
         }
     }
@@ -454,22 +484,23 @@ impl Vm {
         &mut self,
         f: &FnItem,
         args: &[Expr],
-        caller: &mut Frame,
-        locals: &mut Frame,
+        arena: &mut Vec<Value>,
+        caller: Frame,
+        locals: Frame,
     ) -> Result<(), EvalError> {
         let mut idx = 0;
         for stmt in &f.body.stmts {
             let StmtKind::Let(let_stmt) = &stmt.kind else { continue };
             let value = if idx < args.len() {
-                let v = self.eval_expr(&args[idx], caller)?;
+                let v = self.eval_expr(&args[idx], arena, caller)?;
                 idx += 1;
                 v
             } else if let Some(init) = &let_stmt.init {
-                self.eval_expr(init, locals)?
+                self.eval_expr(init, arena, locals)?
             } else {
                 Value::Int(0)
             };
-            frame_set(locals, &let_stmt.name.name, let_stmt.slot, value)?;
+            frame_set(arena, locals, &let_stmt.name.name, let_stmt.slot, value)?;
         }
         Ok(())
     }
