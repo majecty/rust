@@ -51,6 +51,7 @@ members = [
   "toy/eval",
   "toy/expand",
   "toy/lexer",
+  "toy/mir",
   "toy/resolve",
   "toy/span",
   "toy/tokenstream-lowering",

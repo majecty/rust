@@ -5,6 +5,7 @@
 pub fn parse(args: &[String]) -> Result<Option<CliArgs>, String> {
     let mut lex_only = false;
     let mut ast_only = false;
+    let mut mir_only = false;
     let mut trace = false;
     let mut sample: Option<String> = None;
     let mut path: Option<String> = None;
@@ -15,6 +16,8 @@ pub fn parse(args: &[String]) -> Result<Option<CliArgs>, String> {
             lex_only = true;
         } else if arg == "--ast" {
             ast_only = true;
+        } else if arg == "--mir" {
+            mir_only = true;
         } else if arg == "--trace" {
             trace = true;
         } else if arg == "--sample" {
@@ -32,8 +35,8 @@ pub fn parse(args: &[String]) -> Result<Option<CliArgs>, String> {
         }
         i += 1;
     }
-    if lex_only && ast_only {
-        return Err("--lex와 --ast는 함께 쓸 수 없음".to_string());
+    if [lex_only, ast_only, mir_only].iter().filter(|x| **x).count() > 1 {
+        return Err("--lex/--ast/--mir는 함께 쓸 수 없음".to_string());
     }
     if sample.is_some() && path.is_some() {
         return Err("--sample과 파일 인자는 함께 쓸 수 없음".to_string());
@@ -44,6 +47,7 @@ pub fn parse(args: &[String]) -> Result<Option<CliArgs>, String> {
     Ok(Some(CliArgs {
         lex_only,
         ast_only,
+        mir_only,
         trace,
         sample,
         path,
@@ -54,6 +58,7 @@ pub fn parse(args: &[String]) -> Result<Option<CliArgs>, String> {
 pub struct CliArgs {
     pub lex_only: bool,
     pub ast_only: bool,
+    pub mir_only: bool,
     pub trace: bool,
     pub sample: Option<String>,
     pub path: Option<String>,

@@ -11,3 +11,4 @@ rtoy-resolve = { path = "../resolve" }
 rtoy-span = { path = "../span" }
 rtoy-expand = { path = "../expand" }
 rtoy-eval = { path = "../eval" }
+rtoy-mir = { path = "../mir" }

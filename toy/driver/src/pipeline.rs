@@ -23,6 +23,7 @@ pub fn run(args: &[String]) -> i32 {
         }
     };
     let ast_only = cli.ast_only;
+    let mir_only = cli.mir_only;
     let mut owned_path = String::new();
     let src_path = resolve_src_path(&cli, &mut owned_path);
     let src = match read_src(&src_path) {
@@ -33,10 +34,10 @@ pub fn run(args: &[String]) -> i32 {
     if cli.lex_only {
         return run_lex_only(&tokens, &src);
     }
-    run_pipeline(&src_path, &src, cli.trace, ast_only)
+    run_pipeline(&src_path, &src, cli.trace, ast_only, mir_only)
 }
 
-fn run_pipeline(src_path: &str, src: &str, trace: bool, ast_only: bool) -> i32 {
+fn run_pipeline(src_path: &str, src: &str, trace: bool, ast_only: bool, mir_only: bool) -> i32 {
     let tokens = rtoy_lexer::tokenize(src);
     if trace {
         println!("== lex ({} tokens) ==", tokens.len());
@@ -80,6 +81,17 @@ fn run_pipeline(src_path: &str, src: &str, trace: bool, ast_only: bool) -> i32 {
     }
     if ast_only {
         println!("ast: {:#?}", krate);
+        return EXIT_SUCCESS;
+    }
+    if mir_only {
+        let mir = match rtoy_mir::lower_crate(&krate) {
+            Ok(mir) => mir,
+            Err(e) => {
+                print_error_chain("mir lowering failed", &e);
+                return EXIT_FAILURE;
+            }
+        };
+        print!("{}", mir.dump());
         return EXIT_SUCCESS;
     }
     match rtoy_eval::eval_crate(&krate) {
@@ -145,9 +157,10 @@ fn resolve_src_path(cli: &args::CliArgs, owned: &mut String) -> String {
 }
 
 fn print_help() {
-    println!("rtoy [--lex|--ast] <file.rs> | --sample <name> — minimal rustc_driver toy");
+    println!("rtoy [--lex|--ast|--mir] <file.rs> | --sample <name> — minimal rustc_driver toy");
     println!("  --lex: lex 결과물만 출력하고 종료");
     println!("  --ast: AST만 출력하고 종료");
+    println!("  --mir: MIR 덤프만 출력하고 종료 (rustc -Zunpretty=mir 흉내)");
     println!("  (기본) main을 eval 실행해 `value:` 출력");
     println!("  --sample <name>: toy/samples/<name>.rs 실행");
     println!("  --trace: lex→lowering(before)→expand(after) 단계별 출력");
