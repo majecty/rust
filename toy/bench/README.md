@@ -1,7 +1,7 @@
 # bench — 언어별 재귀 fib 비교
 
 rtoy가 다른 언어 대비 어느 정도인지 보는 용도. AST 워킹 인터프리터라
-fib(25)에서 CPython의 약 27배 느리다(원인: 이름 HashMap 변수 조회 + 호출마다 `FnItem` clone).
+fib(25)에서 CPython의 약 1.5배 느리다(원인: AST 노드 순회 + 값마다 40바이트 move).
 
 ## 실행
 ```sh
@@ -11,15 +11,26 @@ ts_run toy/bench/fib-bench.ts 25 3      # 또는: node toy/bench/fib-bench.ts 25
 - 컴파일 언어(c/rust/go)는 빌드 시간을 실행 시간에서 제외한다.
 - lua/luajit 바이너리가 없으면 `$TMPDIR/luasrc`에 소스 빌드한다(root 불필요, 네트워크 필요).
 - ruby/php/go가 없으면 `SKIP`으로 표시되고 나머지만 측정한다.
+- **rtoy도 release로 빌드한다** — c는 `-O2`, rust는 `-O`, go는 기본 최적화라 조건을 맞춤.
+  (debug로 빌드하면 같은 코드가 648ms로 4배 넘게 느리게 나온다.)
 
-## 측정 결과 (2026-09-22, fib(25), 최소값)
-| c | rust | luajit | lua | node | python | perl | rtoy |
+## 측정 결과 (fib(25), 최소값, release 프로필)
+| c | rust | luajit | lua | node | python | rtoy | perl |
 |---|---|---|---|---|---|---|---|
-| 1.7 | 1.7 | 2.8 | 6.1 | 17.4 | 24.4 | 34.0 | **649.8** |
+| 2.0 | 2.1 | 2.9 | 6.2 | 16.4 | 17.2 | **25.9** | 34.2 |
 
-컨테이너 부하에 따라 수치가 흔들린다(rtoy 배수는 27~50x 범위). 상대 비교용으로만 볼 것.
+컨테이너 부하에 따라 수치가 흔들린다(rtoy 배수는 1.2~2x 범위). 상대 비교용으로만 볼 것.
+
+### 참고: rtoy 개선 이력 (fib(25), 같은 소스)
+| 단계 | debug | release |
+|---|---|---|
+| 초기 (debug 빌드로 측정) | 648 ms | 139 ms |
+| release 빌드로 측정 조건 통일 | 648 ms | 160 ms |
+| eval: locals HashMap → 선형 스캔 `Vec`, `FnItem` clone → `Rc` | 171 ms | 26 ms |
+
+초기(2026-09-22) 27배 수치는 debug 빌드 결과였고, 위 표는 최적화 후 재측정 값이다.
 
 ## rtoy 쪽 주의
 - argv/stdin이 없어 `n`을 소스에 박는다(`{N}` 치환). 소스는 `$TMPDIR/fibbench/fib.rtoy.rs`.
 - 파라미터 AST가 없어 인자는 선두 `let` 자리 관례를 쓴다: `fn fib() { let n = 0; if n < 2 { n } else { ... } }`.
-- 드라이버 바이너리는 `$TMPDIR/rtoy-bench/debug/rtoy-driver`로 빌드해 직접 실행한다(`toy/run`은 매번 cargo를 거친다).
+- 드라이버 바이너리는 `$TMPDIR/rtoy-bench/release/rtoy-driver`로 빌드해 직접 실행한다(`toy/run`은 매번 cargo를 거친다).

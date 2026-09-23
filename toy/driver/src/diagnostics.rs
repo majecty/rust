@@ -1,11 +1,23 @@
 //! 진단 출력: E0428 + 에러 체인展开.
 
-/// rustc E0428 스타일 진단. 실패 시 가장 안쪽 원인까지 fallback으로 노출한다.
+/// resolve 진단을 종류별로 출력한다 (렌더링이 불가하면 원인까지 fallback).
 pub fn print_resolve_error(file: &str, src: &str, e: &rtoy_resolve::ResolveError) {
+    match e.kind {
+        rtoy_resolve::ResolveKind::Duplicate => print_duplicate(file, src, e),
+        rtoy_resolve::ResolveKind::UndefinedVar => print_undefined(file, src, e),
+    }
+}
+
+/// rustc E0428 스타일: 같은 이름을 두 번 정의.
+fn print_duplicate(file: &str, src: &str, e: &rtoy_resolve::ResolveError) {
     log_span_backtrace("dup", &e.span);
-    log_span_backtrace("first", &e.first_span);
+    let Some(first_span) = e.first_span else {
+        print_plain(e);
+        return;
+    };
+    log_span_backtrace("first", &first_span);
     let dup_loc = rtoy_span::offset_to_line_col(src, e.span.lo);
-    let first_caret = rtoy_span::caret_line(src, e.first_span);
+    let first_caret = rtoy_span::caret_line(src, first_span);
     let dup_caret = rtoy_span::caret_line(src, e.span);
     match (
         dup_loc,
@@ -37,12 +49,32 @@ pub fn print_resolve_error(file: &str, src: &str, e: &rtoy_resolve::ResolveError
                 e.name
             );
         }
-        _ => {
-            eprintln!("error: {e}");
-            if let Some(src_err) = std::error::Error::source(e) {
-                eprintln!("caused by: {src_err}");
-            }
+        _ => print_plain(e),
+    }
+}
+
+/// rustc E0425 스타일: 이 함수 프레임에 없는 지역변수 참조.
+fn print_undefined(file: &str, src: &str, e: &rtoy_resolve::ResolveError) {
+    log_span_backtrace("undefined", &e.span);
+    match (rtoy_span::offset_to_line_col(src, e.span.lo), rtoy_span::caret_line(src, e.span)) {
+        (Some((line, col)), Some((_, text, caret))) => {
+            eprintln!("error[E0425]: cannot find value `{}` in this function frame", e.name);
+            eprintln!(" --> {file}:{line}:{col}");
+            eprintln!("{:>3} |", "");
+            eprintln!("{:>3} | {text}", line);
+            eprintln!("{:>3} | {caret} not found in this scope", "");
+            eprintln!("{:>3} |", "");
+            eprintln!("  = help: 지역변수는 `let`으로 먼저 선언해야 함 (함수 파라미터는 아직 없음)");
         }
+        _ => print_plain(e),
+    }
+}
+
+/// span 렌더링이 불가능할 때 가장 안쪽 원인까지 노출한다.
+fn print_plain(e: &rtoy_resolve::ResolveError) {
+    eprintln!("error: {e}");
+    if let Some(src_err) = std::error::Error::source(e) {
+        eprintln!("caused by: {src_err}");
     }
 }
 

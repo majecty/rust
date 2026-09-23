@@ -100,6 +100,8 @@ pub enum DelimKind {
 #[derive(Debug, Clone, PartialEq)]
 pub struct FnItem {
     pub body: Block,
+    /// resolve가 채우는 지역변수 slot 수 (프레임 크기). 미해결이면 0.
+    pub locals: u16,
     pub span: Span,
 }
 
@@ -128,6 +130,8 @@ pub struct LetStmt {
     pub name: Ident,
     pub ty: Option<Ty>,
     pub init: Option<Expr>,
+    /// resolve가 채우는 프레임 slot 번호(선언 순서). 미해결이면 None (eval이 이름 fallback).
+    pub slot: Option<u16>,
     pub span: Span,
 }
 
@@ -152,7 +156,8 @@ pub enum BinOp {
 #[derive(Debug, Clone, PartialEq)]
 pub enum ExprKind {
     Int(i64),
-    Var(Ident),
+    /// `x` — 변수 참조. `slot`은 resolve가 채우는 프레임 slot 번호(미해결이면 None).
+    Var { name: Ident, slot: Option<u16> },
     /// `foo(a, b)` — callee는 함수 이름만, 인자는 식.
     Call { callee: Ident, args: Vec<Expr> },
     Binary { op: BinOp, lhs: Box<Expr>, rhs: Box<Expr> },
@@ -178,6 +183,55 @@ pub struct FieldInit {
     pub span: Span,
 }
 
+/// 블록 안 지역변수 선언 순서(이름 중복은 첫 선언만) — index가 프레임 slot 번호다.
+/// 블록 스코프가 없어 `if` 분기 안 `let`도 같은 프레임을 쓰므로 함께 센다.
+pub fn collect_local_names(block: &Block, out: &mut Vec<String>) {
+    for stmt in &block.stmts {
+        match &stmt.kind {
+            StmtKind::Let(l) => {
+                if !out.iter().any(|n| n == &l.name.name) {
+                    out.push(l.name.name.clone());
+                }
+                if let Some(init) = &l.init {
+                    collect_names_in_expr(init, out);
+                }
+            }
+            StmtKind::Expr(e) => collect_names_in_expr(e, out),
+        }
+    }
+    if let Some(tail) = &block.tail {
+        collect_names_in_expr(tail, out);
+    }
+}
+
+fn collect_names_in_expr(expr: &Expr, out: &mut Vec<String>) {
+    match &expr.kind {
+        ExprKind::If { cond, then_block, else_block } => {
+            collect_names_in_expr(cond, out);
+            collect_local_names(then_block, out);
+            if let Some(block) = else_block {
+                collect_local_names(block, out);
+            }
+        }
+        ExprKind::Binary { lhs, rhs, .. } => {
+            collect_names_in_expr(lhs, out);
+            collect_names_in_expr(rhs, out);
+        }
+        ExprKind::Call { args, .. } | ExprKind::Macro { args, .. } => {
+            for arg in args {
+                collect_names_in_expr(arg, out);
+            }
+        }
+        ExprKind::StructLiteral { fields, .. } => {
+            for field in fields {
+                collect_names_in_expr(&field.value, out);
+            }
+        }
+        ExprKind::FieldAccess { base, .. } => collect_names_in_expr(base, out),
+        ExprKind::Int(_) | ExprKind::Var { .. } => {}
+    }
+}
+
 /// 빈 `fn main(){}` 더미 — driver 배선 확인용.
 pub fn dummy_crate() -> Crate {
     let s = Span::root(0, 0);
@@ -187,6 +241,7 @@ pub fn dummy_crate() -> Crate {
             name: Ident { name: "main".into(), span: s },
             kind: ItemKind::Fn(FnItem {
                 body: Block { stmts: vec![], tail: None, span: s },
+                locals: 0,
                 span: s,
             }),
             span: s,

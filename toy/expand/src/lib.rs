@@ -118,13 +118,13 @@ pub fn expand_item(item: rtoy_ast::Item) -> Result<rtoy_ast::Item, ExpandError> 
             }
             let mut it = args.into_iter().map(expand_expr);
             let arg = it.next().expect("checked len")?;
-            let rtoy_ast::ExprKind::Var(fn_name) = arg.kind else {
+            let rtoy_ast::ExprKind::Var { name: fn_name, .. } = arg.kind else {
                 return Err(ExpandError { mac: "def_fn".into(), expected: "ident (e.g. def_fn!(foo))".into(), got: 1, source: None });
             };
             let span = item.span;
             let name = rtoy_ast::Ident { name: fn_name.name, span: rtoy_span::Span::copied_arg(fn_name.span, item.span) };
             let empty = Block { stmts: vec![], tail: None, span };
-            Ok(Item { name, kind: ItemKind::Fn(FnItem { body: empty, span }), span })
+            Ok(Item { name, kind: ItemKind::Fn(FnItem { body: empty, locals: 0, span }), span })
         }
         ItemKind::Macro { name, args } => {
             let n = args.len();
@@ -489,7 +489,7 @@ mod tests {
             name: Ident { name: "def_fn".into(), span: Span::root(0, 6) },
             kind: ItemKind::Macro {
                 name: Ident { name: "def_fn".into(), span: Span::root(0, 6) },
-                args: vec![Expr { kind: ExprKind::Var(Ident { name: "foo".into(), span: arg_span }), span: arg_span }],
+                args: vec![Expr { kind: ExprKind::Var { name: Ident { name: "foo".into(), span: arg_span }, slot: None }, span: arg_span }],
             },
             span: call,
         };

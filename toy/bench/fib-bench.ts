@@ -5,6 +5,7 @@
 // 예: ts_run toy/bench/fib-bench.ts 25 3   |   node toy/bench/fib-bench.ts 25 3
 //
 // - 컴파일 언어(c/rust/go)는 빌드 시간을 실행 시간에서 제외한다.
+// - rtoy도 release로 빌드한다 (다른 언어가 -O2/-O로 측정되므로 조건을 맞춤).
 // - lua/luajit는 바이너리가 없으면 /tmp/pi/luasrc에 소스 빌드한다 (root 불필요, 네트워크 필요).
 // - rtoy는 argv가 없어 n을 소스에 박는다({N} 치환).
 import { spawnSync } from "node:child_process";
@@ -16,7 +17,7 @@ import { fileURLToPath } from "node:url";
 const DIR = join(tmpdir(), "fibbench");
 const LUA_DIR = join(tmpdir(), "luasrc");
 const TOY_DIR = dirname(dirname(fileURLToPath(import.meta.url)));
-const RTOY_BIN = join(tmpdir(), "rtoy-bench", "debug", "rtoy-driver");
+const RTOY_BIN = join(tmpdir(), "rtoy-bench", "release", "rtoy-driver");
 const RUSTC = join(homedir(), ".cargo", "bin", "rustc");
 
 type Run = { ok: boolean; out: string };
@@ -148,7 +149,8 @@ function main(): void {
 
   const luaNote = ensureLua();
   const rtoyEnv = { ...process.env, CARGO_TARGET_DIR: join(tmpdir(), "rtoy-bench") };
-  const rtoyBuild = spawnSync("cargo", ["build", "-p", "rtoy-driver"], {
+  // 다른 언어가 최적화 빌드(c -O2, rust -O)로 측정되므로 rtoy도 release로 맞춘다.
+  const rtoyBuild = spawnSync("cargo", ["build", "--release", "-p", "rtoy-driver"], {
     cwd: TOY_DIR,
     env: rtoyEnv,
     encoding: "utf8",

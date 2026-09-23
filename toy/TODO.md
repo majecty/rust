@@ -20,20 +20,20 @@
 - 워크스페이스 members에 toy 8개 crate 등록 (ast/driver/eval/expand/lexer/span/tokenstream-lowering/resolve)
 - span: `Span{lo,hi,ctxt,parent}` + `SyntaxContext/ExpnId/ExpnData` + `root/copied_arg/fresh_child/chain/same_var` + 테스트 5개
 - lexer: char_indices tokenize + `Comment`(`//`~개행전) + 테스트 1개 (`lexer→ast` 역전 해소)
-- ast: Crate/Item/Fn/Block/Stmt(`Expr`/`Let`)/`LetStmt`/Expr(`Int`/`Var`/`Call`/`Macro`/`StructLiteral`/`FieldAccess`/`If`)/이항연산(`+ - * / %`·`<`)/`MacroDef`/`StructItem`/`FieldInit` + 테스트 1개
+- ast: Crate/Item/Fn/Block/Stmt(`Expr`/`Let`)/`LetStmt`/Expr(`Int`/`Var{name,slot}`/`Call`/`Macro`/`StructLiteral`/`FieldAccess`/`If`)/이항연산(`+ - * / %`·`<`)/`MacroDef`/`StructItem`/`FieldInit` + 테스트 1개
 - expand: `lift/expand(twice/my_let)` + `expand_expr/expand_item/expand_crate(twice!/def_fn!)` + `macro_rules!` 패턴매칭/전개 + 테스트 11개
-- eval: 단일 byte array 메모리 인터프리터 — `Memory(Vec<u8>)` + `StructLayout{size, slots}` + `Value::Struct` offset 핸들, **resolve가 채운 slot 우선**(미해결은 이름 fallback) + `if`/`<`/재귀 호출 + 테스트 16개
+- eval: 단일 byte array 메모리 인터프리터 — `Memory(Vec<u8>)` + `StructLayout{size, slots}` + `Value::Struct` offset 핸들, **resolve가 채운 slot 우선**(미해결은 이름 fallback) + **변수 프레임 `Frame=Vec<Value>`**(resolve가 채운 `Var/LetStmt.slot`만 사용, 이름표 없음) + `FnItem.locals`(프레임 크기) + `Rc<FnItem>` 공유 + `if`/`<`/재귀 호출 + 테스트 19개
 - samples: `twice.rs` · `dup-fn-macro.rs` (`def_fn!(foo)+fn foo` 중복 재현) · `struct.rs` (정의/리터럴/필드) · driver `--trace` 한 줄 요약
 - lowering: `fn name() { stmt* tail? }` + `if cond { } else { }` + `<` 비교 + 아이템 매크로 `def_fn!(foo)` + `struct`/리터럴/`p.x` 파서 + 테스트 8개
-- resolve: 중복 fn 검사(미전개 Macro 제외) + **필드 참조 ident→slot 제자리 변형**(`FieldAccess/FieldInit.slot`) + 매크로/직접정의 중복 통합테스트 + 테스트 5개
+- resolve: 중복 fn 검사(미전개 Macro 제외) + **미정의 변수 에러**(`ResolveKind::UndefinedVar`, driver E0425) + **필드 참조 ident→slot**(`FieldAccess/FieldInit.slot`) + **지역변수 slot 배정 + `FnItem.locals`**(shadowing은 같은 slot 재사용) + 테스트 9개
 - driver: lex → lowering → expand → resolve → eval (기본 `value:` 출력, `--ast`면 AST 덤프)
-- bench: `toy/bench/fib-bench.ts` — python/ruby/node/php/perl/lua/luajit/go/c/rust/rtoy fib 비교(미설치·빌드 실패는 SKIP, 컴파일 시간 제외). fib(25) rtoy 650ms ≈ CPython의 27배
-- 테스트 총 47개 통과 (span 5/lexer 1/ast 1/lowering 8/resolve 5/expand 11/eval 16) · struct + slot 변형 + `if`/재귀(fib 실행 가능) 추가
+- bench: `toy/bench/fib-bench.ts` — python/ruby/node/php/perl/lua/luajit/go/c/rust/rtoy fib 비교(미설치·빌드 실패는 SKIP, 컴파일 시간 제외, rtoy도 release). fib(25) rtoy 22ms ≈ CPython의 1.3배
+- 테스트 총 54개 통과 (span 5/lexer 1/ast 1/lowering 8/resolve 9/expand 11/eval 19) · struct + slot 변형 + `if`/재귀(fib 실행 가능) + 프레임 섀도잉/재호출
 - Span: lexer→span→ast→lowering 배선 완료
   - `Token.span`, `Item.span`, `Block.span`, `Expr.span` 필드 유지
   - lowering: Item/Block/Expr span 생성 및 연결
   - `spans_cover_source` 테스트 통과 (총 9개 통과)
-- 알려진 틈: 블록주석 미지원·타입은 식별자 1개만·`snippet` 범위검사 없음
+- 알려진 틈: 블록주석 미지원·타입은 식별자 1개만·`snippet` 범위검사 없음·`if x {`(조건 끝 식별자)가 struct literal로 오파싱(rustc의 no-struct-literal 제한 미구현)
 - 상세 수치는 [현황](docs/status.md) 참조
 
 ## 4. 다음 할 일
@@ -64,7 +64,12 @@
 - [x] Samples: `struct.rs`
 - [ ] Expand: `my_let!` AST 전개 + 위생 테스트
 - [x] Eval: 재귀 호출 + `if`/`else` + `<` (인자 바인딩은 선두 `let` 자리 관례)
-- [ ] Eval 성능: 지역변수 슬롯화(`Vec<Value>`) + 호출마다 `FnItem` clone 제거 — fib(25) 650ms vs CPython 24ms
+- [x] Eval 성능 1: 변수 프레임 `HashMap` → 선형 스캔 `Vec<(String,Value)>` + `Rc<FnItem>` 공유(호출마다 AST clone 제거) — fib(25) release 160ms → 26ms
+- [x] Eval 성능 2: resolve가 지역변수 slot을 채워 `Vec<Value>` 인덱스 접근(이름 비교 제거) — `Frame=Vec<Value>` + `FnItem.locals`, fib(30) 215→176ms(-18%) · fib(25) rtoy 26.7→22ms
+- [ ] Eval 성능 3: 호출 프레임 `Vec<Value>` 재사용(호출 깊이별 스택 + base offset) — 호출당 할당 1회 제거
+- [ ] Eval 성능 4: callee를 fn index로 resolve가 심기 — 호출당 `HashMap<String,_>` 해시 제거
+- [x] Resolve 엄격화: 미정의 변수는 resolve 에러(`ResolveKind`, driver E0425) · eval은 resolve된 slot만 사용(이름 fallback 제거) · resolve 미경유 AST는 `EvalError::UnresolvedLocal`로 거부 — eval 테스트도 실제 resolve를 거치게 함
+- [ ] Resolve: 선언 전 사용(`x; let x = 1;`)이 조용히 `()`가 되는 구멍 — 선언 순서 추적 또는 uninit 센티넬
 - [ ] Lowering: `fn` 파라미터 AST 도입해 `let` 자리 관례 제거
 - [ ] Resolve 진단: 매크로 생성 이름의 `expanded from def_fn! here` note + snippet이 호출문 전체를 보여줄지 결정
 - [x] Span/docs: `docs/status.md` 8-crate 현행화 (2026-09-22)

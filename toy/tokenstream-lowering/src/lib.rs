@@ -75,7 +75,7 @@ impl<'a> Lowering<'a> {
         let (fn_tok, name) = self.parse_fn_head()?;
         let body = self.parse_block()?;
         let span = Span::root(fn_tok.span.lo, body.span.hi);
-        Ok(Item { name, kind: ItemKind::Fn(FnItem { body, span }), span })
+        Ok(Item { name, kind: ItemKind::Fn(FnItem { body, locals: 0, span }), span })
     }
 
     /// `def_fn!(foo)`처럼 아이템 위치 매크로 호출인지 미리보기 (소비 없음).
@@ -224,7 +224,7 @@ impl<'a> Lowering<'a> {
         self.expect_punct("let eq", '=')?;
         let init = self.parse_expr()?;
         let span = Span::root(let_tok.span.lo, init.span.hi);
-        Ok(LetStmt { name, ty, init: Some(init), span })
+        Ok(LetStmt { name, ty, init: Some(init), slot: None, span })
     }
 
     /// 식. 예: `42`, `x`, `foo(1, x)`, `1 + 2 * 3`, `if c { .. } else { .. }`.
@@ -380,7 +380,7 @@ impl<'a> Lowering<'a> {
             return Ok(Expr { kind: ExprKind::StructLiteral { name: ident, fields }, span });
         }
         self.pos = save;
-        Ok(Expr { kind: ExprKind::Var(ident), span: t.span })
+        Ok(Expr { kind: ExprKind::Var { name: ident, slot: None }, span: t.span })
     }
 
     /// 구조체 리터럴 필드 목록. 예: `x: 1, y: 2` — 닫는 `}`는 소비하지 않는다.
@@ -589,7 +589,7 @@ mod tests {
                         assert_eq!(callee.span.snippet(src), "foo");
                         assert_eq!(args.len(), 2);
                         assert_eq!(args[0].span.snippet(src), "x");
-                        assert!(matches!(&args[0].kind, ExprKind::Var(v) if v.name == "x"));
+                        assert!(matches!(&args[0].kind, ExprKind::Var { name, .. } if name.name == "x"));
                         assert!(matches!(&args[1].kind, ExprKind::Int(2)));
                     }
                     other => panic!("expected call, got {other:?}"),

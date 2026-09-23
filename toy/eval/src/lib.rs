@@ -6,10 +6,12 @@
 
 use rtoy_ast::*;
 use std::collections::HashMap;
+use std::rc::Rc;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum EvalError {
-    UndefinedVar(String),
+    /// resolve를 거치지 않았거나 resolve 결과와 프레임이 어긋난 지역변수.
+    UnresolvedLocal(String),
     NotAFunction(String),
     ArgCountMismatch { expected: usize, got: usize },
     EmptyMain,
@@ -19,7 +21,9 @@ pub enum EvalError {
 impl std::fmt::Display for EvalError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            EvalError::UndefinedVar(n) => write!(f, "undefined variable: {}", n),
+            EvalError::UnresolvedLocal(n) => {
+                write!(f, "unresolved local: {n} (resolve must run before eval)")
+            }
             EvalError::NotAFunction(n) => write!(f, "not a function: {}", n),
             EvalError::ArgCountMismatch { expected, got } => {
                 write!(f, "argument count mismatch: expected {} got {}", expected, got)
@@ -180,30 +184,69 @@ fn format_value(memory: &Memory, layouts: &HashMap<String, StructLayout>, value:
 /// Crate를 실행하여 main의 반환값과 메모리를 돌려준다.
 pub fn eval_crate(krate: &Crate) -> Result<Runtime, EvalError> {
     let mut vm = Vm::register(krate)?;
-    let main_body = vm
-        .fns
-        .get("main")
-        .ok_or_else(|| EvalError::NotAFunction("main".into()))?
-        .body
-        .clone();
-    let value = vm.eval_block(&main_body, &mut HashMap::new())?;
+    // Rc만 복제한다 (호출마다 AST를 clone하지 않기 위함).
+    let main_fn = vm.main_fn()?;
+    let mut frame = new_frame(main_fn.locals);
+    let value = vm.eval_block(&main_fn.body, &mut frame)?;
     Ok(Runtime { value, memory: vm.memory, layouts: vm.layouts })
+}
+
+/// 지역변수 프레임 — resolve가 배정한 slot 번호가 그대로 index다.
+/// 크기는 resolve가 채운 `FnItem.locals`에서 나온다 (이름표를 들고 다니지 않는다).
+type Frame = Vec<Value>;
+
+/// 프레임을 slot 수만큼 `Value::Unit`으로 채워 만든다.
+fn new_frame(locals: u16) -> Frame {
+    vec![Value::Unit; locals as usize]
+}
+
+/// slot 번호를 프레임 index로 바꾼다.
+/// resolve를 거치지 않은 AST는 slot이 없거나 범위를 벗어나므로 조용히 넘기지 않는다.
+fn slot_index(frame: &Frame, name: &str, slot: Option<u16>) -> Result<usize, EvalError> {
+    let index = slot.ok_or_else(|| {
+        EvalError::UnresolvedLocal(format!("`{name}` has no slot (resolve not run)"))
+    })? as usize;
+    if index >= frame.len() {
+        return Err(EvalError::UnresolvedLocal(format!(
+            "`{name}` slot {index} out of range (frame has {})",
+            frame.len()
+        )));
+    }
+    Ok(index)
+}
+
+/// 프레임에서 값을 읽는다.
+fn frame_get(frame: &Frame, name: &str, slot: Option<u16>) -> Result<Value, EvalError> {
+    let index = slot_index(frame, name, slot)?;
+    Ok(frame[index].clone())
+}
+
+/// 프레임에 값을 쓴다 (같은 이름 재선언은 같은 slot을 덮어쓴다 — 선형 스캔과 같은 의미).
+fn frame_set(frame: &mut Frame, name: &str, slot: Option<u16>, value: Value) -> Result<(), EvalError> {
+    let index = slot_index(frame, name, slot)?;
+    frame[index] = value;
+    Ok(())
 }
 
 /// 함수 정의 + layout + 단일 메모리.
 struct Vm {
-    fns: HashMap<String, FnItem>,
+    /// 호출마다 `FnItem`을 clone하면 AST 전체가 복사되므로 Rc로 공유한다.
+    fns: HashMap<String, Rc<FnItem>>,
     layouts: HashMap<String, StructLayout>,
     memory: Memory,
 }
 
 impl Vm {
+    fn main_fn(&self) -> Result<Rc<FnItem>, EvalError> {
+        self.fns.get("main").cloned().ok_or_else(|| EvalError::NotAFunction("main".into()))
+    }
+
     fn register(krate: &Crate) -> Result<Vm, EvalError> {
         let mut vm = Vm { fns: HashMap::new(), layouts: HashMap::new(), memory: Memory::default() };
         for item in &krate.items {
             match &item.kind {
                 ItemKind::Fn(f) => {
-                    vm.fns.insert(item.name.name.clone(), f.clone());
+                    vm.fns.insert(item.name.name.clone(), Rc::new(f.clone()));
                 }
                 ItemKind::Struct(s) => {
                     vm.layouts.insert(item.name.name.clone(), StructLayout::of(s)?);
@@ -214,51 +257,40 @@ impl Vm {
         Ok(vm)
     }
 
-    fn eval_block(
-        &mut self,
-        block: &Block,
-        vars: &mut HashMap<String, Value>,
-    ) -> Result<Value, EvalError> {
+    fn eval_block(&mut self, block: &Block, frame: &mut Frame) -> Result<Value, EvalError> {
         for stmt in &block.stmts {
             match &stmt.kind {
                 StmtKind::Let(let_stmt) => {
                     let val = match &let_stmt.init {
-                        Some(init) => self.eval_expr(init, vars)?,
+                        Some(init) => self.eval_expr(init, frame)?,
                         None => Value::Int(0),
                     };
-                    vars.insert(let_stmt.name.name.clone(), val);
+                    frame_set(frame, &let_stmt.name.name, let_stmt.slot, val)?;
                 }
                 StmtKind::Expr(expr) => {
-                    self.eval_expr(expr, vars)?;
+                    self.eval_expr(expr, frame)?;
                 }
             }
         }
         match &block.tail {
-            Some(tail) => self.eval_expr(tail, vars),
+            Some(tail) => self.eval_expr(tail, frame),
             None => Ok(Value::Unit),
         }
     }
 
-    fn eval_expr(
-        &mut self,
-        expr: &Expr,
-        vars: &mut HashMap<String, Value>,
-    ) -> Result<Value, EvalError> {
+    fn eval_expr(&mut self, expr: &Expr, frame: &mut Frame) -> Result<Value, EvalError> {
         match &expr.kind {
             ExprKind::Int(n) => Ok(Value::Int(*n)),
-            ExprKind::Var(ident) => vars
-                .get(&ident.name)
-                .cloned()
-                .ok_or_else(|| EvalError::UndefinedVar(ident.name.clone())),
-            ExprKind::Binary { op, lhs, rhs } => self.eval_binary(op, lhs, rhs, vars),
-            ExprKind::StructLiteral { name, fields } => self.build_struct(name, fields, vars),
+            ExprKind::Var { name, slot } => frame_get(frame, &name.name, *slot),
+            ExprKind::Binary { op, lhs, rhs } => self.eval_binary(op, lhs, rhs, frame),
+            ExprKind::StructLiteral { name, fields } => self.build_struct(name, fields, frame),
             ExprKind::FieldAccess { base, field, slot } => {
-                let val = self.eval_expr(base, vars)?;
+                let val = self.eval_expr(base, frame)?;
                 self.read_field(&val, &field.name, *slot)
             }
-            ExprKind::Call { callee, args } => self.eval_call(callee, args, vars),
+            ExprKind::Call { callee, args } => self.eval_call(callee, args, frame),
             ExprKind::If { cond, then_block, else_block } => {
-                self.eval_if(cond, then_block, else_block.as_deref(), vars)
+                self.eval_if(cond, then_block, else_block.as_deref(), frame)
             }
             ExprKind::Macro { .. } => Err(EvalError::NotImplemented("macro call (not expanded)".into())),
         }
@@ -269,10 +301,10 @@ impl Vm {
         op: &BinOp,
         lhs: &Expr,
         rhs: &Expr,
-        vars: &mut HashMap<String, Value>,
+        frame: &mut Frame,
     ) -> Result<Value, EvalError> {
-        let l = self.eval_expr(lhs, vars)?;
-        let r = self.eval_expr(rhs, vars)?;
+        let l = self.eval_expr(lhs, frame)?;
+        let r = self.eval_expr(rhs, frame)?;
         match (op, &l, &r) {
             (BinOp::Add, Value::Int(a), Value::Int(b)) => Ok(Value::Int(a + b)),
             (BinOp::Sub, Value::Int(a), Value::Int(b)) => Ok(Value::Int(a - b)),
@@ -291,20 +323,20 @@ impl Vm {
     }
 
     /// if 식: 조건이 0이 아니면 then, 0이면 else (else 없으면 Unit).
-    /// 블록 레벨 스코프가 없어 분기 안 `let`은 바깥 변수 맵에 그대로 들어간다.
+    /// 블록 레벨 스코프가 없어 분기 안 `let`은 바깥 프레임에 그대로 들어간다.
     fn eval_if(
         &mut self,
         cond: &Expr,
         then_block: &Block,
         else_block: Option<&Block>,
-        vars: &mut HashMap<String, Value>,
+        frame: &mut Frame,
     ) -> Result<Value, EvalError> {
-        match self.eval_expr(cond, vars)? {
+        match self.eval_expr(cond, frame)? {
             Value::Int(0) => match else_block {
-                Some(block) => self.eval_block(block, vars),
+                Some(block) => self.eval_block(block, frame),
                 None => Ok(Value::Unit),
             },
-            Value::Int(_) => self.eval_block(then_block, vars),
+            Value::Int(_) => self.eval_block(then_block, frame),
             other => Err(EvalError::NotImplemented(format!(
                 "if condition must be int, got {other:?}"
             ))),
@@ -316,7 +348,7 @@ impl Vm {
         &mut self,
         name: &Ident,
         fields: &[FieldInit],
-        vars: &mut HashMap<String, Value>,
+        frame: &mut Frame,
     ) -> Result<Value, EvalError> {
         let layout = self
             .layouts
@@ -326,7 +358,7 @@ impl Vm {
         let offset = self.memory.alloc(layout.size);
         for field in fields {
             let slot = self.slot_of_field(&layout, &name.name, field)?;
-            let Value::Int(n) = self.eval_expr(&field.value, vars)? else {
+            let Value::Int(n) = self.eval_expr(&field.value, frame)? else {
                 return Err(EvalError::NotImplemented(format!(
                     "non-int field {} (구조체 중첩 미지원)",
                     field.name.name
@@ -383,12 +415,12 @@ impl Vm {
         &mut self,
         callee: &Ident,
         args: &[Expr],
-        vars: &mut HashMap<String, Value>,
+        frame: &mut Frame,
     ) -> Result<Value, EvalError> {
         if callee.name == "print" {
             let vals: Vec<Value> = args
                 .iter()
-                .map(|a| self.eval_expr(a, vars))
+                .map(|a| self.eval_expr(a, frame))
                 .collect::<Result<_, _>>()?;
             for v in &vals {
                 print!("{} ", format_value(&self.memory, &self.layouts, v));
@@ -397,14 +429,15 @@ impl Vm {
             return Ok(Value::Unit);
         }
 
+        // Rc 복제만 하므로 호출마다 함수 AST를 clone하지 않는다.
         let f = self
             .fns
             .get(&callee.name)
-            .ok_or_else(|| EvalError::NotAFunction(callee.name.clone()))?
-            .clone();
+            .cloned()
+            .ok_or_else(|| EvalError::NotAFunction(callee.name.clone()))?;
 
-        let mut locals = HashMap::new();
-        self.bind_args(&f, args, vars, &mut locals)?;
+        let mut locals = new_frame(f.locals);
+        self.bind_args(&f, args, frame, &mut locals)?;
         for stmt in &f.body.stmts {
             if let StmtKind::Expr(expr) = &stmt.kind {
                 self.eval_expr(expr, &mut locals)?;
@@ -421,14 +454,14 @@ impl Vm {
         &mut self,
         f: &FnItem,
         args: &[Expr],
-        vars: &mut HashMap<String, Value>,
-        locals: &mut HashMap<String, Value>,
+        caller: &mut Frame,
+        locals: &mut Frame,
     ) -> Result<(), EvalError> {
         let mut idx = 0;
         for stmt in &f.body.stmts {
             let StmtKind::Let(let_stmt) = &stmt.kind else { continue };
             let value = if idx < args.len() {
-                let v = self.eval_expr(&args[idx], vars)?;
+                let v = self.eval_expr(&args[idx], caller)?;
                 idx += 1;
                 v
             } else if let Some(init) = &let_stmt.init {
@@ -436,7 +469,7 @@ impl Vm {
             } else {
                 Value::Int(0)
             };
-            locals.insert(let_stmt.name.name.clone(), value);
+            frame_set(locals, &let_stmt.name.name, let_stmt.slot, value)?;
         }
         Ok(())
     }
@@ -451,8 +484,17 @@ mod tests {
         Expr { kind: ExprKind::Int(n), span: Span::root(0, 0) }
     }
 
+    /// slot을 주지 않은 참조 — eval이 프레임 이름표로 fallback 해석한다.
     fn var(name: &str) -> Expr {
-        Expr { kind: ExprKind::Var(Ident { name: name.into(), span: Span::root(0, 0) }), span: Span::root(0, 0) }
+        var_at(name, None)
+    }
+
+    /// resolve가 slot을 채웠다고 가정한 참조 (slot이 있으면 이름보다 우선해야 한다).
+    fn var_at(name: &str, slot: Option<u16>) -> Expr {
+        Expr {
+            kind: ExprKind::Var { name: Ident { name: name.into(), span: Span::root(0, 0) }, slot },
+            span: Span::root(0, 0),
+        }
     }
 
     fn add(l: Expr, r: Expr) -> Expr {
@@ -465,6 +507,7 @@ mod tests {
                 name: Ident { name: name.into(), span: Span::root(0, 0) },
                 ty: None,
                 init: Some(init),
+                slot: None,
                 span: Span::root(0, 0),
             }),
             span: Span::root(0, 0),
@@ -476,14 +519,25 @@ mod tests {
             name: Ident { name: "main".into(), span: Span::root(0, 0) },
             kind: ItemKind::Fn(FnItem {
                 body: Block { stmts, tail, span: Span::root(0, 0) },
+                locals: 0,
                 span: Span::root(0, 0),
             }),
             span: Span::root(0, 0),
         }
     }
 
+    /// 손으로 만든 AST를 resolve까지 통과시켜 실행한다 (eval은 resolve된 AST를 전제한다).
     fn run(items: Vec<Item>) -> Runtime {
-        eval_crate(&Crate { items, span: Span::root(0, 0) }).unwrap()
+        let mut krate = Crate { items, span: Span::root(0, 0) };
+        if let Err(errs) = rtoy_resolve::resolve(&mut krate, "") {
+            panic!("resolve 실패: {errs:?}");
+        }
+        eval_crate(&krate).unwrap()
+    }
+
+    /// resolve를 일부러 건너뛴 AST — slot 미지정/오지정 검증용.
+    fn run_unresolved(items: Vec<Item>) -> Result<Runtime, EvalError> {
+        eval_crate(&Crate { items, span: Span::root(0, 0) })
     }
 
     #[test]
@@ -529,9 +583,22 @@ mod tests {
     }
 
     #[test]
-    fn eval_undefined_var() {
-        let krate = Crate { items: vec![main_fn(vec![], Some(var("x")))], span: Span::root(0, 0) };
-        assert!(matches!(eval_crate(&krate), Err(EvalError::UndefinedVar(_))));
+    fn unresolved_local_is_rejected() {
+        // resolve를 건너뛴 Var는 이름으로 찾지 않고 즉시 실패한다.
+        let items = vec![main_fn(vec![], Some(var("x")))];
+        assert!(matches!(run_unresolved(items), Err(EvalError::UnresolvedLocal(_))));
+    }
+
+    #[test]
+    fn unresolved_slots_are_rejected() {
+        // resolve를 건너뛴 AST: slot이 없거나 프레임 범위를 벗어나면 즉시 실패한다.
+        let no_slot = vec![main_fn(vec![let_stmt("x", int_lit(10))], Some(int_lit(1)))];
+        let Err(err) = run_unresolved(no_slot) else { panic!("에러가 아님") };
+        assert!(err.to_string().contains("has no slot"), "{err}");
+
+        let out_of_range = vec![main_fn(vec![], Some(var_at("x", Some(9))))];
+        let Err(err) = run_unresolved(out_of_range) else { panic!("에러가 아님") };
+        assert!(err.to_string().contains("out of range"), "{err}");
     }
 
     #[test]
@@ -665,7 +732,7 @@ mod tests {
             struct_def("Point", vec![("x", "i64"), ("y", "i64")]),
             main_fn(vec![], Some(field_access_at(base, "x", Some(1)))),
         ];
-        assert_eq!(run(items).value, Value::Int(20));
+        assert_eq!(run_unresolved(items).unwrap().value, Value::Int(20));
     }
 
     #[test]
@@ -718,7 +785,7 @@ mod tests {
         let body = Block { stmts: vec![let_stmt("n", int_lit(0))], tail: Some(tail), span: s };
         Item {
             name: Ident { name: "fib".into(), span: s },
-            kind: ItemKind::Fn(FnItem { body, span: s }),
+            kind: ItemKind::Fn(FnItem { body, locals: 0, span: s }),
             span: s,
         }
     }
@@ -735,6 +802,40 @@ mod tests {
     fn eval_recursive_fib() {
         let items = vec![fib_fn(), main_fn(vec![], Some(call("fib", int_lit(10))))];
         assert_eq!(run(items).value, Value::Int(55));
+    }
+
+    #[test]
+    fn eval_let_shadows_previous_binding() {
+        // 같은 이름 재바인딩은 이전 값을 덮어쓴다 (프레임 = slot index 배열).
+        let items = vec![main_fn(
+            vec![let_stmt("x", int_lit(1)), let_stmt("x", add(var("x"), int_lit(41)))],
+            Some(var("x")),
+        )];
+        assert_eq!(run(items).value, Value::Int(42));
+    }
+
+    #[test]
+    fn eval_same_fn_called_twice() {
+        // Rc로 공유한 FnItem을 두 번 호출해도 결과가 같아야 한다 (호출이 AST를 변형하지 않음).
+        let s = Span::root(0, 0);
+        let inc = Item {
+            name: Ident { name: "inc".into(), span: s },
+            kind: ItemKind::Fn(FnItem {
+                body: Block {
+                    stmts: vec![let_stmt("n", int_lit(0))],
+                    tail: Some(add(var("n"), int_lit(1))),
+                    span: s,
+                },
+                locals: 0,
+                span: s,
+            }),
+            span: s,
+        };
+        let items = vec![
+            inc,
+            main_fn(vec![], Some(add(call("inc", int_lit(1)), call("inc", int_lit(2))))),
+        ];
+        assert_eq!(run(items).value, Value::Int(5));
     }
 
     #[test]

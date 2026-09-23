@@ -42,7 +42,7 @@ fn expr_sum(e: &rtoy_ast::Expr, src: &str) -> String {
     let snip = e.span.try_snippet(src).unwrap_or("<invalid>");
     let kind = match &e.kind {
         rtoy_ast::ExprKind::Int(n) => format!("Int({n})"),
-        rtoy_ast::ExprKind::Var(v) => format!("Var({})", v.name),
+        rtoy_ast::ExprKind::Var { name, .. } => format!("Var({})", name.name),
         rtoy_ast::ExprKind::Call { callee, args } => {
             format!("Call({}/{})", callee.name, args.len())
         }
