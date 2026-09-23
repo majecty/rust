@@ -7,14 +7,17 @@ fib(25)에서 CPython의 약 1.5배 느리다(원인: AST 노드 순회 + 값마
 ```sh
 ts_run toy/bench/fib-bench.ts 25 3      # 또는: node toy/bench/fib-bench.ts 25 3
 ```
-- ARGS: `[n=25] [runs=3]` — 최소값(ms) 기준, 출력 값이 기대값과 다르면 `MISMATCH`로 표시.
+- ARGS: `[n=25] [runs=3] [--md] [--json=<path>]` — warmup 1회를 버리고 runs회 측정해 **min/median/max**(ms)를 낸다.
+  검증값(기대값 대조)은 첫 측정 run에서 고정하며, 다르면 `MISMATCH`로 표시.
+- `--md`면 markdown 표를, `--json=<path>`면 결과 JSON을 추가로 출력한다.
 - 컴파일 언어(c/rust/go)는 빌드 시간을 실행 시간에서 제외한다.
 - lua/luajit 바이너리가 없으면 `$TMPDIR/luasrc`에 소스 빌드한다(root 불필요, 네트워크 필요).
 - ruby/php/go가 없으면 `SKIP`으로 표시되고 나머지만 측정한다.
 - **rtoy도 release로 빌드한다** — c는 `-O2`, rust는 `-O`, go는 기본 최적화라 조건을 맞춤.
   (debug로 빌드하면 같은 코드가 648ms로 4배 넘게 느리게 나온다.)
 
-## 측정 결과 (fib(25), 최소값, release 프로필)
+## 측정 결과 (fib(25), min, release 프로필)
+`--md`로 이 표를 재생성한다. min은 노이즈에 강하지만 median/max와 함께 볼 것.
 | c | rust | luajit | lua | node | python | rtoy | perl |
 |---|---|---|---|---|---|---|---|
 | 2.0 | 2.1 | 2.9 | 6.2 | 16.4 | 17.2 | **25.9** | 34.2 |

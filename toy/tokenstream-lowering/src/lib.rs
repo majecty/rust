@@ -38,11 +38,14 @@ pub struct Lowering<'a> {
     tokens: &'a [Token],
     src: &'a str,
     pos: usize,
+    /// rustc의 no-struct-literal 제한: `if`/`while` 조건처럼 `{`가 블록 시작인 자리에서
+    /// struct literal 파싱을 금지한다 (예: `if x { .. }`의 `x {`를 리터럴로 먹지 않게).
+    no_struct_literal: bool,
 }
 
 impl<'a> Lowering<'a> {
     pub fn new(tokens: &'a [Token], src: &'a str) -> Self {
-        Self { tokens, src, pos: 0 }
+        Self { tokens, src, pos: 0, no_struct_literal: false }
     }
 
     /// 크레이트 전체. 예: `fn main() { 42 } fn foo() { 1 }`.
@@ -178,6 +181,9 @@ impl<'a> Lowering<'a> {
     /// 블록. 예: `{ let x = 1; 42 }`, `{ 42 }`.
     fn parse_block(&mut self) -> Result<Block, LowerError> {
         let open = self.expect_punct("block", '{')?;
+        // 블록 안에서는 다시 struct literal을 허용한다.
+        let saved = self.no_struct_literal;
+        self.no_struct_literal = false;
         let mut stmts = Vec::new();
         let mut tail: Option<Expr> = None;
         loop {
@@ -185,6 +191,7 @@ impl<'a> Lowering<'a> {
             if self.peek_is_punct('}') {
                 let close = self.bump().expect("peeked `}`");
                 let span = Span::root(open.span.lo, close.span.hi);
+                self.no_struct_literal = saved;
                 return Ok(Block { stmts, tail, span });
             }
             if self.peek_is_ident("let") {
@@ -244,7 +251,12 @@ impl<'a> Lowering<'a> {
     /// if 식. 예: `if n < 2 { n } else { 0 }` (else 생략 가능).
     fn parse_if(&mut self) -> Result<Expr, LowerError> {
         let if_tok = self.expect_ident("if expr", "if")?;
-        let cond = self.parse_expr()?;
+        // 조건에서는 struct literal을 금지한다 (rustc: `if x { .. }`의 `{`는 블록 시작).
+        let saved = self.no_struct_literal;
+        self.no_struct_literal = true;
+        let cond = self.parse_expr();
+        self.no_struct_literal = saved;
+        let cond = cond?;
         let then_block = self.parse_block()?;
         self.skip_trivia();
         let else_block = if self.peek_is_ident("else") {
@@ -372,7 +384,7 @@ impl<'a> Lowering<'a> {
             let span = Span::root(t.span.lo, end);
             return Ok(Expr { kind: ExprKind::Macro { name: ident, args }, span });
         }
-        if self.peek_is_punct('{') {
+        if !self.no_struct_literal && self.peek_is_punct('{') {
             self.bump();
             let fields = self.parse_field_inits()?;
             let close = self.expect_punct("struct literal", '}')?;
@@ -701,6 +713,23 @@ mod tests {
                 let else_tail = else_block.as_ref().unwrap().tail.as_ref().unwrap();
                 assert_eq!(else_tail.span.snippet(src), "20");
                 assert_eq!(tail.span.snippet(src), "if 1 < 2 { 10 } else { 20 }");
+            }
+            other => panic!("expected if, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn if_cond_rejects_struct_literal() {
+        // rustc의 no-struct-literal 제한: `if x { .. }`는 조건 `x` + 블록이다.
+        let src = "fn main() { let x = 1; if x { 10 } else { 20 } }";
+        let krate = lower(&tokenize(src), src);
+        let ItemKind::Fn(f) = &krate.items[0].kind else { panic!("expected Fn") };
+        let tail = f.body.tail.as_ref().expect("tail");
+        match &tail.kind {
+            ExprKind::If { cond, then_block, .. } => {
+                assert!(matches!(&cond.kind, ExprKind::Var { name, .. } if name.name == "x"));
+                assert_eq!(then_block.tail.as_ref().unwrap().span.snippet(src), "10");
+                assert_eq!(tail.span.snippet(src), "if x { 10 } else { 20 }");
             }
             other => panic!("expected if, got {other:?}"),
         }

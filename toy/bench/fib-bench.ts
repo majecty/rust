@@ -1,12 +1,14 @@
 // fib-bench.ts — 재귀 fib(n) 언어별 실행 시간 비교 (rtoy 포함).
 // USE FOR: python/ruby/node/php/perl/lua/luajit/go/c/rust/rtoy 중 설치된 것만 측정
 // DO NOT USE FOR: 마이크로 최적화 검증 (AST 워킹 vs VM 차이만 보는 용도)
-// ARGS: [n=25] [runs=3]
-// 예: ts_run toy/bench/fib-bench.ts 25 3   |   node toy/bench/fib-bench.ts 25 3
+// ARGS: [n=25] [runs=3] [--md] [--json=<path>]
+// 예: ts_run toy/bench/fib-bench.ts 25 3 --md   |   node toy/bench/fib-bench.ts 25 3 --json=/tmp/pi/fib.json
 //
 // - 컴파일 언어(c/rust/go)는 빌드 시간을 실행 시간에서 제외한다.
 // - rtoy도 release로 빌드한다 (다른 언어가 -O2/-O로 측정되므로 조건을 맞춤).
 // - lua/luajit는 바이너리가 없으면 /tmp/pi/luasrc에 소스 빌드한다 (root 불필요, 네트워크 필요).
+// - warmup 1회는 버리고 runs회 측정한다 (JIT/프로세스 기동비용 제외).
+// - 출력: min/median/max ms, `--md`면 markdown 표, `--json=<path>`면 결과 저장.
 // - rtoy는 argv가 없어 n을 소스에 박는다({N} 치환).
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
@@ -112,20 +114,42 @@ function refFib(n: number): number {
   return a;
 }
 
-function measure(cmd: string, args: string[], runs: number, prefix?: string): { ms: number; out: string; raw: string } {
-  let best = Infinity;
+type Stats = { min: number; median: number; max: number; out: string; raw: string };
+type Row = { lang: string; min: number; median: number; max: number; note: string };
+
+const fmt = (x: number): string => (Number.isFinite(x) ? x.toFixed(1) : "-");
+
+/** warmup 1회 버리고 runs회 측정 → min/median/max. 검증값은 첫 측정 run에서 고정. */
+function measure(cmd: string, args: string[], runs: number, prefix?: string): Stats {
+  const samples: number[] = [];
   let out = "";
   let raw = "";
-  for (let i = 0; i < runs; i++) {
+  for (let i = 0; i <= runs; i++) {
     const t0 = process.hrtime.bigint();
     const r = run(cmd, args);
-    best = Math.min(best, Number(process.hrtime.bigint() - t0) / 1e6);
-    const lines = r.out.split("\n").map((l) => l.trim()).filter(Boolean);
-    raw = lines.slice(0, 2).join(" | ");
-    const hit = lines.find((l) => (prefix ? l.startsWith(prefix) : /^\d+$/.test(l))) ?? "";
-    out = prefix ? hit.slice(prefix.length) : hit;
+    const ms = Number(process.hrtime.bigint() - t0) / 1e6;
+    if (i === 0) continue; // warmup — JIT/기동비용 제외
+    samples.push(ms);
+    if (i === 1) {
+      const lines = r.out.split("\n").map((l) => l.trim()).filter(Boolean);
+      raw = lines.slice(0, 2).join(" | ");
+      const hit = lines.find((l) => (prefix ? l.startsWith(prefix) : /^\d+$/.test(l))) ?? "";
+      out = prefix ? hit.slice(prefix.length) : hit;
+    }
   }
-  return { ms: best, out, raw };
+  const sorted = [...samples].sort((a, b) => a - b);
+  const mid = sorted[Math.floor(sorted.length / 2)];
+  const median = sorted.length % 2 ? mid : (sorted[sorted.length / 2 - 1] + mid) / 2;
+  return { min: sorted[0], median, max: sorted[sorted.length - 1], out, raw };
+}
+
+function mdTable(rows: Row[], base: number, baseLabel: string): string {
+  const head = "| lang | min | median | max | ratio | note |\n|---|---|---|---|---|---|";
+  const body = rows.map((r) => {
+    const ratio = Number.isFinite(r.min) ? `${(r.min / base).toFixed(2)}x ${baseLabel}` : "-";
+    return `| ${r.lang} | ${fmt(r.min)} | ${fmt(r.median)} | ${fmt(r.max)} | ${ratio} | ${r.note} |`;
+  });
+  return [head, ...body].join("\n");
 }
 
 /** 컴파일 언어는 미리 빌드하고 실행 시간에서 제외한다. */
@@ -141,8 +165,12 @@ function prepare(target: Target, n: number): { cmd: string; args: string[]; skip
 }
 
 function main(): void {
-  const n = Number(process.argv[2] ?? 25);
-  const runs = Number(process.argv[3] ?? 3);
+  const argv = process.argv.slice(2);
+  const jsonPath = argv.find((a) => a.startsWith("--json="))?.slice("--json=".length);
+  const wantMd = argv.includes("--md");
+  const positional = argv.filter((a) => !a.startsWith("--"));
+  const n = Number(positional[0] ?? 25);
+  const runs = Number(positional[1] ?? 3);
   const expect = refFib(n);
   mkdirSync(DIR, { recursive: true });
   for (const [file, src] of Object.values(SOURCES)) writeFileSync(join(DIR, file), src.replace("{N}", String(n)));
@@ -169,31 +197,37 @@ function main(): void {
     { lang: "c", tool: "gcc", script: "fib.c", build: ["-O2"] },
     { lang: "rust", tool: RUSTC, script: "fib.rs", build: ["-O"] },
     { lang: "go", tool: "go", script: "fib.go", build: ["build"] },
-    { lang: "rtoy", tool: RTOY_BIN, script: "fib.rtoy.rs", absPath: true, prefix: "value: ", runs: 2, skip: rtoyOk ? "" : `cargo build 실패: ${(rtoyBuild.stderr ?? "").slice(0, 60)}` },
+    { lang: "rtoy", tool: RTOY_BIN, script: "fib.rtoy.rs", absPath: true, prefix: "value: ", skip: rtoyOk ? "" : `cargo build 실패: ${(rtoyBuild.stderr ?? "").slice(0, 60)}` },
   ];
 
-  console.log(`=== fib(${n}) 최소값, x${runs} runs, expected=${expect} ===`);
-  const rows: { lang: string; ms: number; note: string }[] = [];
+  console.log(`=== fib(${n}) min/median/max ms, warmup 1 + x${runs} runs, expected=${expect} ===`);
+  const skipped = (lang: string, note: string): Row => ({ lang, min: Infinity, median: Infinity, max: Infinity, note });
+  const rows: Row[] = [];
   for (const target of targets) {
     const skip = target.skip || (missing(target.tool) ? `${target.tool} 없음` : "");
     if (skip) {
-      rows.push({ lang: target.lang, ms: Infinity, note: `SKIP (${skip})` });
+      rows.push(skipped(target.lang, `SKIP (${skip})`));
       continue;
     }
     const { cmd, args, skip: buildNote } = prepare(target, n);
     if (buildNote) {
-      rows.push({ lang: target.lang, ms: Infinity, note: buildNote });
+      rows.push(skipped(target.lang, buildNote));
       continue;
     }
-    const { ms, out, raw } = measure(cmd, args, target.runs ?? runs, target.prefix);
-    rows.push({ lang: target.lang, ms, note: out === String(expect) ? "ok" : `MISMATCH out=${out} raw=${raw.slice(0, 120)}` });
+    const { min, median, max, out, raw } = measure(cmd, args, target.runs ?? runs, target.prefix);
+    rows.push({ lang: target.lang, min, median, max, note: out === String(expect) ? "ok" : `MISMATCH out=${out} raw=${raw.slice(0, 120)}` });
   }
-  rows.sort((a, b) => a.ms - b.ms);
-  const base = rows.find((r) => r.lang === "python")?.ms ?? Infinity;
+  rows.sort((a, b) => a.min - b.min);
+  // python이 없으면 가장 빠른 유한값을 기준으로 삼는다 (base=Infinity면 전부 "-"가 되는 문제 방지).
+  const baseRow = rows.find((r) => r.lang === "python" && Number.isFinite(r.min)) ?? rows.find((r) => Number.isFinite(r.min));
+  const base = baseRow?.min ?? Infinity;
+  const baseLabel = baseRow?.lang ?? "-";
   for (const r of rows) {
-    const ratio = Number.isFinite(r.ms) ? `${(r.ms / base).toFixed(2)}x py` : "-";
-    console.log(`${r.lang.padEnd(7)} ${r.ms.toFixed(1).padStart(9)} ms  ${ratio.padStart(9)}  ${r.note}`);
+    const ratio = Number.isFinite(r.min) ? `${(r.min / base).toFixed(2)}x ${baseLabel}` : "-";
+    console.log(`${r.lang.padEnd(7)} ${fmt(r.min).padStart(8)} ${fmt(r.median).padStart(8)} ${fmt(r.max).padStart(8)}  ${ratio.padStart(12)}  ${r.note}`);
   }
+  if (wantMd) console.log(`\n${mdTable(rows, base, baseLabel)}`);
+  if (jsonPath) writeFileSync(jsonPath, JSON.stringify({ n, runs, expected: expect, base: baseLabel, rows }, null, 2));
 }
 
 main();

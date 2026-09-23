@@ -24,16 +24,16 @@
 - expand: `lift/expand(twice/my_let)` + `expand_expr/expand_item/expand_crate(twice!/def_fn!)` + `macro_rules!` 패턴매칭/전개 + 테스트 11개
 - eval: 단일 byte array 메모리 인터프리터 — `Memory(Vec<u8>)` + `StructLayout{size, slots}` + `Value::Struct` offset 핸들, **resolve가 채운 slot 우선**(미해결은 이름 fallback) + **변수 프레임 `Frame=Vec<Value>`**(resolve가 채운 `Var/LetStmt.slot`만 사용, 이름표 없음) + `FnItem.locals`(프레임 크기) + `Rc<FnItem>` 공유 + `if`/`<`/재귀 호출 + 테스트 19개
 - samples: `twice.rs` · `dup-fn-macro.rs` (`def_fn!(foo)+fn foo` 중복 재현) · `struct.rs` (정의/리터럴/필드) · driver `--trace` 한 줄 요약
-- lowering: `fn name() { stmt* tail? }` + `if cond { } else { }` + `<` 비교 + 아이템 매크로 `def_fn!(foo)` + `struct`/리터럴/`p.x` 파서 + 테스트 8개
+- lowering: `fn name() { stmt* tail? }` + `if cond { } else { }` + `<` 비교 + 아이템 매크로 `def_fn!(foo)` + `struct`/리터럴/`p.x` 파서 + `if` 조건 no-struct-literal 제한 + 테스트 9개
 - resolve: 중복 fn 검사(미전개 Macro 제외) + **미정의 변수 에러**(`ResolveKind::UndefinedVar`, driver E0425) + **필드 참조 ident→slot**(`FieldAccess/FieldInit.slot`) + **지역변수 slot 배정 + `FnItem.locals`**(shadowing은 같은 slot 재사용) + 테스트 9개
 - driver: lex → lowering → expand → resolve → eval (기본 `value:` 출력, `--ast`면 AST 덤프)
-- bench: `toy/bench/fib-bench.ts` — python/ruby/node/php/perl/lua/luajit/go/c/rust/rtoy fib 비교(미설치·빌드 실패는 SKIP, 컴파일 시간 제외, rtoy도 release). fib(25) rtoy 22ms ≈ CPython의 1.3배
-- 테스트 총 54개 통과 (span 5/lexer 1/ast 1/lowering 8/resolve 9/expand 11/eval 19) · struct + slot 변형 + `if`/재귀(fib 실행 가능) + 프레임 섀도잉/재호출
+- bench: `toy/bench/fib-bench.ts` — python/node/perl/lua/luajit/c/rust/rtoy fib 비교(미설치·빌드 실패는 SKIP, 컴파일 시간 제외, rtoy도 release) · min/median/max + warmup 1회 + `--md`/`--json=<path>`. fib(25) rtoy 22ms ≈ CPython의 1.3배
+- 테스트 총 55개 통과 (span 5/lexer 1/ast 1/lowering 9/resolve 9/expand 11/eval 19) · struct + slot 변형 + `if`/재귀(fib 실행 가능) + 프레임 섀도잉/재호출
 - Span: lexer→span→ast→lowering 배선 완료
   - `Token.span`, `Item.span`, `Block.span`, `Expr.span` 필드 유지
   - lowering: Item/Block/Expr span 생성 및 연결
   - `spans_cover_source` 테스트 통과 (총 9개 통과)
-- 알려진 틈: 블록주석 미지원·타입은 식별자 1개만·`snippet` 범위검사 없음·`if x {`(조건 끝 식별자)가 struct literal로 오파싱(rustc의 no-struct-literal 제한 미구현)
+- 알려진 틈: 블록주석 미지원·타입은 식별자 1개만·`snippet` 범위검사 없음
 - 상세 수치는 [현황](docs/status.md) 참조
 
 ## 4. 다음 할 일
@@ -70,6 +70,7 @@
 - [ ] Eval 성능 4: callee를 fn index로 resolve가 심기 — 호출당 `HashMap<String,_>` 해시 제거
 - [x] Resolve 엄격화: 미정의 변수는 resolve 에러(`ResolveKind`, driver E0425) · eval은 resolve된 slot만 사용(이름 fallback 제거) · resolve 미경유 AST는 `EvalError::UnresolvedLocal`로 거부 — eval 테스트도 실제 resolve를 거치게 함
 - [ ] Resolve: 선언 전 사용(`x; let x = 1;`)이 조용히 `()`가 되는 구멍 — 선언 순서 추적 또는 uninit 센티넬
+- [x] Lowering: `if` 조건 no-struct-literal 제한 (rustc 패리티) — `if x { .. }`가 struct literal로 오파싱되던 버그 수정 + 테스트 1개
 - [ ] Lowering: `fn` 파라미터 AST 도입해 `let` 자리 관례 제거
 - [ ] Resolve 진단: 매크로 생성 이름의 `expanded from def_fn! here` note + snippet이 호출문 전체를 보여줄지 결정
 - [x] Span/docs: `docs/status.md` 8-crate 현행화 (2026-09-22)
@@ -78,7 +79,7 @@
 - [ ] HIR 스텁: AST → 간단 HIR ([상세](docs/roadmap.md))
 - [ ] Eval: 구조체 중첩 필드 (layout 안에 하위 layout offset)
 - [x] Bench: `toy/bench/fib-bench.ts` — 재귀 fib로 python/node/perl/lua/luajit/c/rust/rtoy 비교 (ruby/php/go는 미설치면 SKIP)
-- [ ] Bench: ruby/php/go 측정 추가 (go는 공식 prebuilt tarball로 root 없이 가능)
+- [x] Bench: 통계 보강 — min/median/max + warmup 1회 + 검증값 첫 run 고정 + `--md`/`--json=<path>` (rtoy도 runs 3으로 통일)
 - [ ] 위키 정리: 단계마다 `[[rust-*]]` 페이지 ([[rust-rtoy-eval]]은 갱신 완료)
 - [ ] 테스트: crate별 파서 케이스 보강
 
