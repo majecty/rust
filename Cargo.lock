@@ -3508,11 +3508,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "rtoy-driver"
+name = "rtoy-ast-lowering"
 version = "0.0.1"
 dependencies = [
  "rtoy-ast",
- "rtoy-eval",
  "rtoy-expand",
  "rtoy-lexer",
  "rtoy-mir",
@@ -3522,13 +3521,33 @@ dependencies = [
 ]
 
 [[package]]
+name = "rtoy-driver"
+version = "0.0.1"
+dependencies = [
+ "rtoy-ast",
+ "rtoy-ast-lowering",
+ "rtoy-eval",
+ "rtoy-expand",
+ "rtoy-hir",
+ "rtoy-lexer",
+ "rtoy-mir",
+ "rtoy-resolve",
+ "rtoy-span",
+ "rtoy-thir",
+ "rtoy-tokenstream-lowering",
+]
+
+[[package]]
 name = "rtoy-eval"
 version = "0.0.1"
 dependencies = [
  "rtoy-ast",
+ "rtoy-ast-lowering",
+ "rtoy-lexer",
  "rtoy-mir",
  "rtoy-resolve",
  "rtoy-span",
+ "rtoy-tokenstream-lowering",
 ]
 
 [[package]]
@@ -3538,6 +3557,16 @@ dependencies = [
  "rtoy-ast",
  "rtoy-lexer",
  "rtoy-span",
+]
+
+[[package]]
+name = "rtoy-hir"
+version = "0.0.1"
+dependencies = [
+ "rtoy-ast",
+ "rtoy-lexer",
+ "rtoy-span",
+ "rtoy-tokenstream-lowering",
 ]
 
 [[package]]
@@ -3552,11 +3581,7 @@ name = "rtoy-mir"
 version = "0.0.1"
 dependencies = [
  "rtoy-ast",
- "rtoy-expand",
- "rtoy-lexer",
- "rtoy-resolve",
  "rtoy-span",
- "rtoy-tokenstream-lowering",
 ]
 
 [[package]]
@@ -3573,6 +3598,16 @@ dependencies = [
 [[package]]
 name = "rtoy-span"
 version = "0.0.1"
+
+[[package]]
+name = "rtoy-thir"
+version = "0.0.1"
+dependencies = [
+ "rtoy-hir",
+ "rtoy-lexer",
+ "rtoy-span",
+ "rtoy-tokenstream-lowering",
+]
 
 [[package]]
 name = "rtoy-tokenstream-lowering"
