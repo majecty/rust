@@ -3515,6 +3515,7 @@ dependencies = [
  "rtoy-eval",
  "rtoy-expand",
  "rtoy-lexer",
+ "rtoy-mir",
  "rtoy-resolve",
  "rtoy-span",
  "rtoy-tokenstream-lowering",
@@ -3525,6 +3526,7 @@ name = "rtoy-eval"
 version = "0.0.1"
 dependencies = [
  "rtoy-ast",
+ "rtoy-mir",
  "rtoy-resolve",
  "rtoy-span",
 ]
@@ -3543,6 +3545,18 @@ name = "rtoy-lexer"
 version = "0.0.1"
 dependencies = [
  "rtoy-span",
+]
+
+[[package]]
+name = "rtoy-mir"
+version = "0.0.1"
+dependencies = [
+ "rtoy-ast",
+ "rtoy-expand",
+ "rtoy-lexer",
+ "rtoy-resolve",
+ "rtoy-span",
+ "rtoy-tokenstream-lowering",
 ]
 
 [[package]]
