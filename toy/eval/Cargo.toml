@@ -11,3 +11,8 @@ rtoy-mir = { path = "../mir" }
 [dev-dependencies]
 # 테스트가 실제 resolve를 거쳐 slot을 채운 AST로 eval한다 (eval은 resolve를 전제).
 rtoy-resolve = { path = "../resolve" }
+# MIR 스텝 실행 테스트가 소스 → lowering 경로를 쓰기 때문.
+rtoy-lexer = { path = "../lexer" }
+rtoy-tokenstream-lowering = { path = "../tokenstream-lowering" }
+# 스텝 실행 테스트가 소스 → MIR lowering 경로를 쓴다.
+rtoy-ast-lowering = { path = "../ast-lowering" }

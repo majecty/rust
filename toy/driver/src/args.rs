@@ -5,8 +5,11 @@
 pub fn parse(args: &[String]) -> Result<Option<CliArgs>, String> {
     let mut lex_only = false;
     let mut ast_only = false;
+    let mut hir_only = false;
+    let mut thir_only = false;
     let mut mir_only = false;
     let mut mir_eval = false;
+    let mut mir_steps: Option<u64> = None;
     let mut trace = false;
     let mut sample: Option<String> = None;
     let mut path: Option<String> = None;
@@ -17,10 +20,19 @@ pub fn parse(args: &[String]) -> Result<Option<CliArgs>, String> {
             lex_only = true;
         } else if arg == "--ast" {
             ast_only = true;
+        } else if arg == "--hir" {
+            hir_only = true;
+        } else if arg == "--thir" {
+            thir_only = true;
         } else if arg == "--mir" {
             mir_only = true;
         } else if arg == "--mir-eval" {
             mir_eval = true;
+        } else if let Some(raw) = arg.strip_prefix("--mir-steps=") {
+            match raw.parse::<u64>() {
+                Ok(n) => mir_steps = Some(n),
+                Err(e) => return Err(format!("--mir-steps 값이 올바르지 않음: {raw} ({e})")),
+            }
         } else if arg == "--trace" {
             trace = true;
         } else if arg == "--sample" {
@@ -38,8 +50,11 @@ pub fn parse(args: &[String]) -> Result<Option<CliArgs>, String> {
         }
         i += 1;
     }
-    if [lex_only, ast_only, mir_only, mir_eval].iter().filter(|x| **x).count() > 1 {
-        return Err("--lex/--ast/--mir/--mir-eval는 함께 쓸 수 없음".to_string());
+    let dumps = [lex_only, ast_only, hir_only, thir_only, mir_only, mir_eval];
+    if dumps.iter().filter(|x| **x).count() > 1
+        || (mir_steps.is_some() && (lex_only || ast_only || hir_only || thir_only || mir_only))
+    {
+        return Err("--lex/--ast/--hir/--thir/--mir/--mir-eval/--mir-steps는 함께 쓸 수 없음".to_string());
     }
     if sample.is_some() && path.is_some() {
         return Err("--sample과 파일 인자는 함께 쓸 수 없음".to_string());
@@ -50,8 +65,11 @@ pub fn parse(args: &[String]) -> Result<Option<CliArgs>, String> {
     Ok(Some(CliArgs {
         lex_only,
         ast_only,
+        hir_only,
+        thir_only,
         mir_only,
         mir_eval,
+        mir_steps,
         trace,
         sample,
         path,
@@ -62,8 +80,13 @@ pub fn parse(args: &[String]) -> Result<Option<CliArgs>, String> {
 pub struct CliArgs {
     pub lex_only: bool,
     pub ast_only: bool,
+    /// `--hir`/`--thir`: 해석·desugar된 트리(rustc -Zunpretty=hir/thir 쪽).
+    pub hir_only: bool,
+    pub thir_only: bool,
     pub mir_only: bool,
     pub mir_eval: bool,
+    /// `--mir-steps=N`: MIR을 N스텝만 실행하고 실행 경로·현재 위치를 출력 (웹 한 줄 실행용).
+    pub mir_steps: Option<u64>,
     pub trace: bool,
     pub sample: Option<String>,
     pub path: Option<String>,

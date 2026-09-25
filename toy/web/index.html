@@ -3,22 +3,24 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>rtoy → MIR 실시간 변환</title>
+<title>rtoy → HIR · THIR · MIR 실시간 변환 + 한 줄 실행</title>
 <style>
   :root {
     --bg: #12141a; --panel: #1a1d26; --line: #2b303d; --fg: #dfe3ee;
-    --dim: #8b93a7; --accent: #7cc4ff; --err: #ff8a8a; --ok: #7ddf9a;
+    --dim: #8b93a7; --accent: #7cc4ff; --err: #ff8a8a; --ok: #7ddf9a; --hl: #2b4a66;
   }
   * { box-sizing: border-box; }
   body { margin: 0; height: 100vh; display: flex; flex-direction: column;
          background: var(--bg); color: var(--fg);
          font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
-  header { display: flex; align-items: center; gap: 12px; padding: 10px 14px;
+  header { display: flex; align-items: center; gap: 8px; padding: 10px 14px;
            border-bottom: 1px solid var(--line); background: var(--panel); flex-wrap: wrap; }
   header h1 { margin: 0; font-size: 14px; font-weight: 600; letter-spacing: .02em; }
   header h1 span { color: var(--accent); }
   select, button { background: #232735; color: var(--fg); border: 1px solid var(--line);
                    border-radius: 6px; padding: 4px 8px; font: inherit; cursor: pointer; }
+  button:disabled { color: #555c6d; cursor: default; }
+  #stepinfo { color: var(--accent); min-width: 74px; }
   #status { margin-left: auto; color: var(--dim); }
   #status.err { color: var(--err); }
   #status.ok { color: var(--ok); }
@@ -31,16 +33,38 @@
                   background: transparent; color: inherit; font: inherit; tab-size: 4; }
   textarea { resize: none; outline: none; }
   pre { white-space: pre; }
+  #dump { flex: 2 1 0; min-height: 0; }
+  #trace { flex: 1 1 0; min-height: 0; border-top: 1px solid var(--line); }
+  .label + .label, #trace.label { margin-top: 0; }
+  .cur { display: block; width: 100%; background: var(--hl); }
+  .row { display: block; }
+  .row.click { cursor: pointer; }
+  .row.cur { background: var(--hl); }
+  .dim { color: var(--dim); }
   footer { border-top: 1px solid var(--line); background: var(--panel); }
-  #value { padding: 8px 12px; color: var(--fg); min-height: 34px; white-space: pre-wrap; }
+  #value { padding: 8px 12px 0; color: var(--fg); min-height: 26px; white-space: pre-wrap; }
   #value.err { color: var(--err); }
+  #locals { padding: 0 12px 4px; color: var(--dim); white-space: pre-wrap; }
   .hint { padding: 0 12px 8px; color: var(--dim); font-size: 11px; }
 </style>
 </head>
 <body>
 <header>
-  <h1>rtoy <span>→</span> MIR</h1>
+  <h1>rtoy <span>→</span> HIR · THIR · MIR</h1>
   <select id="samples" aria-label="샘플"></select>
+  <select id="stage" aria-label="단계">
+    <option value="hir">HIR (desugar)</option>
+    <option value="thir">THIR (타입검사)</option>
+    <option value="mir" selected>MIR (CFG)</option>
+  </select>
+  <select id="mode" aria-label="실행 방식">
+    <option value="step">한 줄씩</option>
+    <option value="run">한번에</option>
+  </select>
+  <button id="reset" title="처음으로 (step 0)">⏮</button>
+  <button id="prev" title="한 스텝 뒤로">◀</button>
+  <button id="next" title="한 스텝 앞으로">다음 ▶</button>
+  <span id="stepinfo">step 0</span>
   <button id="run" title="Ctrl/Cmd + Enter">다시 실행</button>
   <span id="status">대기 중…</span>
 </header>
@@ -51,14 +75,17 @@
     <textarea id="src" spellcheck="false"></textarea>
   </section>
   <section>
-    <div class="label">MIR (<code>--mir</code> 덤프)</div>
-    <pre id="mir"></pre>
+    <div class="label" id="dumplabel">MIR (<code>--mir</code> 덤프)</div>
+    <pre id="dump"></pre>
+    <div class="label">실행 경로 (한 줄 클릭 = 그 스텝까지 재생) — MIR 단계에서만 강조</div>
+    <pre id="trace"></pre>
   </section>
 </main>
 
 <footer>
   <div id="value">—</div>
-  <div class="hint">타이핑하면 자동 변환됩니다. <code>_0</code>=반환 자리, <code>bbN</code>=블록, 블록 끝의 점프가 terminator.</div>
+  <div id="locals"></div>
+  <div class="hint">단계 선택 = HIR/THIR/MIR 덤프(한 번 받아 두고 전환은 재컴파일 없이 렌더만). 한 줄씩: 매 요청 처음부터 N스텝 재실행(리플레이)이라 큰 프로그램은 느립니다. <code>_0</code>=반환 자리, <code>bbN</code>=블록, 파란 줄=방금 실행한 MIR 줄.</div>
 </footer>
 
 <script>
@@ -82,10 +109,19 @@ fn main() {
 };
 
 const srcEl = document.getElementById("src");
-const mirEl = document.getElementById("mir");
+const dumpEl = document.getElementById("dump");
+const dumpLabelEl = document.getElementById("dumplabel");
+const stageEl = document.getElementById("stage");
+const traceEl = document.getElementById("trace");
 const valueEl = document.getElementById("value");
+const localsEl = document.getElementById("locals");
 const statusEl = document.getElementById("status");
 const samplesEl = document.getElementById("samples");
+const modeEl = document.getElementById("mode");
+const stepInfoEl = document.getElementById("stepinfo");
+const prevBtn = document.getElementById("prev");
+const nextBtn = document.getElementById("next");
+const resetBtn = document.getElementById("reset");
 
 for (const name of Object.keys(SAMPLES)) {
   const opt = document.createElement("option");
@@ -94,12 +130,93 @@ for (const name of Object.keys(SAMPLES)) {
   samplesEl.appendChild(opt);
 }
 
+/** 화면 상태 — steps는 "몇 스텝까지 실행했는가" (리플레이 예산). */
+const state = { steps: 0, cursor: null, trace: [], lastError: false };
+
 let timer = 0;
 let inflight = 0;
+/** 마지막 성공 응답 — 단계 전환은 재컴파일 없이 이 값으로 다시 그린다. */
+let lastData = null;
+
+const stepMode = () => modeEl.value === "step";
 
 function setStatus(text, cls) {
   statusEl.textContent = text;
   statusEl.className = cls || "";
+}
+
+/** MIR 덤프에서 현재 실행한 줄의 index를 찾는다 (없으면 -1). */
+function cursorLine(lines) {
+  const ev = state.trace.length ? state.trace[state.trace.length - 1] : null;
+  const cursor = state.cursor;
+  if (!cursor) return -1;
+  const fnName = ev ? ev.fn : cursor.fn;
+  const bb = ev ? ev.bb : cursor.bb;
+  const head = lines.findIndex((l) => l.startsWith(`fn ${fnName}(`));
+  if (head < 0) return -1;
+  const bbIdx = lines.findIndex((l, i) => i > head && l.trim() === `bb${bb}: {`);
+  if (bbIdx < 0) return -1;
+  if (!ev) return bbIdx;
+  if (ev.kind === "stmt") return ev.stmt === null ? bbIdx : bbIdx + 1 + ev.stmt;
+  const close = lines.findIndex((l, i) => i > bbIdx && l.trim() === "}");
+  return close > 0 ? close - 1 : bbIdx;
+}
+
+/** pre 안에 줄 단위 span으로 렌더 (hlIdx 줄만 강조). */
+function renderLines(pre, lines, hlIdx, className) {
+  pre.textContent = "";
+  const frag = document.createDocumentFragment();
+  lines.forEach((line, i) => {
+    const span = document.createElement("span");
+    span.textContent = line + "\n";
+    span.className = (className ? className + " " : "") + (i === hlIdx ? "cur" : "");
+    frag.appendChild(span);
+  });
+  pre.appendChild(frag);
+}
+
+/** 실행 경로 패널 — 줄 클릭 시 그 스텝까지 재생. */
+function renderTrace() {
+  traceEl.textContent = "";
+  if (!stepMode()) {
+    traceEl.textContent = "(한 줄씩 모드에서 표시)";
+    return;
+  }
+  if (!state.trace.length) {
+    traceEl.textContent = state.lastError ? "(에러)" : "(아직 아무것도 실행하지 않음 — 다음 ▶)";
+    return;
+  }
+  const frag = document.createDocumentFragment();
+  state.trace.forEach((ev, i) => {
+    const row = document.createElement("span");
+    const where = `${ev.fn} bb${ev.bb}${ev.stmt === null ? "" : ":" + ev.stmt}`;
+    row.textContent = `#${ev.i} ${"  ".repeat(Math.max(0, ev.depth - 1))}${where} · ${ev.text}\n`;
+    row.className = "row click" + (i === state.trace.length - 1 ? " cur" : "");
+    row.title = `step ${ev.i + 1}까지 재생`;
+    row.addEventListener("click", () => { state.steps = ev.i + 1; compileNow(); });
+    frag.appendChild(row);
+  });
+  traceEl.appendChild(frag);
+}
+
+function render(data) {
+  const cursor = state.cursor;
+  const stage = stageEl.value;
+  const text = data[stage] ?? "";
+  const hl = stage === "mir" && stepMode() ? cursorLine(text.split("\n")) : -1;
+  dumpLabelEl.textContent = `${stage.toUpperCase()} (--${stage} 덤프)`;
+  renderLines(dumpEl, text.split("\n"), hl);
+  renderTrace();
+
+  const halted = stepMode() && cursor ? cursor.halted : false;
+  stepInfoEl.textContent = stepMode() ? `step ${state.steps}` : "—";
+  nextBtn.disabled = !stepMode() || !cursor || !halted;
+  prevBtn.disabled = !stepMode() || state.steps === 0;
+  resetBtn.disabled = !stepMode() || state.steps === 0;
+
+  valueEl.className = "";
+  valueEl.textContent = stepMode() && halted ? `실행 중 (${state.steps}스텝)` : data.value || "—";
+  localsEl.textContent = cursor && stepMode() ? cursor.locals.map((l) => `${l.name} = ${l.value}`).join("   ") : "";
 }
 
 async function compileNow() {
@@ -108,24 +225,37 @@ async function compileNow() {
   setStatus("변환 중…");
   const t0 = performance.now();
   try {
-    const res = await fetch("/api/compile", { method: "POST", body: src });
+    const query = stepMode() ? `?steps=${state.steps}` : "";
+    const res = await fetch("/api/compile" + query, { method: "POST", body: src });
     const data = await res.json();
     if (ticket !== inflight) return; // 더 새 요청이 있으면 결과 버림
     const ms = (performance.now() - t0).toFixed(0);
     if (!data.ok) {
-      mirEl.textContent = data.error || "(에러)";
+      state.cursor = null;
+      state.trace = [];
+      lastData = null;
+      dumpLabelEl.textContent = "에러";
+      dumpEl.textContent = data.error || "(에러)";
+      traceEl.textContent = "";
       valueEl.textContent = "—";
       valueEl.className = "err";
+      localsEl.textContent = "";
+      state.lastError = true;
+      renderTrace();
       setStatus(`에러 · ${ms}ms`, "err");
       return;
     }
-    mirEl.textContent = data.mir;
-    valueEl.textContent = data.value || "—";
-    valueEl.className = "";
-    setStatus(`OK · ${ms}ms`, "ok");
+    state.lastError = false;
+    state.cursor = data.cursor ?? null;
+    state.trace = data.trace ?? [];
+    lastData = { hir: data.hir ?? "", thir: data.thir ?? "", mir: data.mir, value: data.value };
+    render(lastData);
+    const label = stepMode() && state.cursor?.halted === false ? "완료" : "OK";
+    setStatus(`${label} · ${ms}ms`, "ok");
   } catch (e) {
     if (ticket !== inflight) return;
-    mirEl.textContent = `요청 실패: ${e}\n서버가 떠 있는지 확인하세요 (node toy/web/serve.ts).`;
+    dumpLabelEl.textContent = "요청 실패";
+    dumpEl.textContent = `요청 실패: ${e}\n서버가 떠 있는지 확인하세요 (node toy/web/serve.ts).`;
     setStatus("요청 실패", "err");
   }
 }
@@ -137,11 +267,21 @@ function schedule() {
 
 srcEl.addEventListener("input", schedule);
 document.getElementById("run").addEventListener("click", compileNow);
+prevBtn.addEventListener("click", () => { state.steps = Math.max(0, state.steps - 1); compileNow(); });
+nextBtn.addEventListener("click", () => { if (nextBtn.disabled) return; state.steps += 1; compileNow(); });
+resetBtn.addEventListener("click", () => { state.steps = 0; compileNow(); });
+modeEl.addEventListener("change", compileNow);
+// 단계 전환은 이미 받은 덤프로만 다시 그린다 (드라이버 재실행 없음).
+stageEl.addEventListener("change", () => { if (lastData) render(lastData); });
 document.addEventListener("keydown", (e) => {
-  if ((e.ctrlKey || e.metaKey) && e.key === "Enter") { e.preventDefault(); compileNow(); }
+  if ((e.ctrlKey || e.metaKey) && e.key === "Enter") { e.preventDefault(); compileNow(); return; }
+  if (!stepMode() || document.activeElement === srcEl) return;
+  if (e.key === "ArrowRight" && !nextBtn.disabled) { state.steps += 1; compileNow(); e.preventDefault(); }
+  if (e.key === "ArrowLeft" && !prevBtn.disabled) { state.steps = Math.max(0, state.steps - 1); compileNow(); e.preventDefault(); }
 });
 samplesEl.addEventListener("change", () => {
   srcEl.value = SAMPLES[samplesEl.value];
+  state.steps = 0;
   compileNow();
 });
 // Tab은 포커스 이동 대신 들여쓰기 (소스 편집 편의)

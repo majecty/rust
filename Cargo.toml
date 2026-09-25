@@ -47,13 +47,16 @@ members = [
   "src/tools/wasm-component-ld",
   "src/tools/x",
   "toy/ast",
+  "toy/ast-lowering",
   "toy/driver",
   "toy/eval",
   "toy/expand",
+  "toy/hir",
   "toy/lexer",
   "toy/mir",
   "toy/resolve",
   "toy/span",
+  "toy/thir",
   "toy/tokenstream-lowering",
 # tidy-alphabetical-end
 ]

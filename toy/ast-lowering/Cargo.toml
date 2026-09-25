@@ -1,0 +1,16 @@
+[package]
+name = "rtoy-ast-lowering"
+version = "0.0.1"
+edition = "2021"
+
+[dependencies]
+rtoy-ast = { path = "../ast" }
+rtoy-mir = { path = "../mir" }
+rtoy-span = { path = "../span" }
+
+[dev-dependencies]
+# 테스트가 실제 lowering/expand/resolve를 거쳐 AST를 만든 뒤 MIR로 내린다.
+rtoy-lexer = { path = "../lexer" }
+rtoy-tokenstream-lowering = { path = "../tokenstream-lowering" }
+rtoy-expand = { path = "../expand" }
+rtoy-resolve = { path = "../resolve" }

@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 mod mir;
-pub use mir::eval_mir;
+pub use mir::{eval_mir, eval_mir_traced, Cursor, MirRun, StepEvent, StepKind};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum EvalError {

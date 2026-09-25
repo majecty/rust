@@ -4,12 +4,6 @@ version = "0.0.1"
 edition = "2021"
 
 [dependencies]
+# BinOp만 IR 타입으로 쓴다 (lowering은 rtoy-ast-lowering).
 rtoy-ast = { path = "../ast" }
 rtoy-span = { path = "../span" }
-
-[dev-dependencies]
-# 테스트가 실제 lowering/expand/resolve를 거쳐 MIR을 만든다.
-rtoy-lexer = { path = "../lexer" }
-rtoy-tokenstream-lowering = { path = "../tokenstream-lowering" }
-rtoy-expand = { path = "../expand" }
-rtoy-resolve = { path = "../resolve" }

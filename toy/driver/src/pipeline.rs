@@ -22,23 +22,22 @@ pub fn run(args: &[String]) -> i32 {
             return EXIT_FAILURE;
         }
     };
-    let ast_only = cli.ast_only;
-    let mir_only = cli.mir_only;
-    let mir_eval = cli.mir_eval;
     let mut owned_path = String::new();
     let src_path = resolve_src_path(&cli, &mut owned_path);
     let src = match read_src(&src_path) {
         Ok(src) => src,
         Err(code) => return code,
     };
-    let tokens = rtoy_lexer::tokenize(&src);
     if cli.lex_only {
+        let tokens = rtoy_lexer::tokenize(&src);
         return run_lex_only(&tokens, &src);
     }
-    run_pipeline(&src_path, &src, cli.trace, ast_only, mir_only, mir_eval)
+    run_pipeline(&src_path, &src, &cli)
 }
 
-fn run_pipeline(src_path: &str, src: &str, trace: bool, ast_only: bool, mir_only: bool, mir_eval: bool) -> i32 {
+fn run_pipeline(src_path: &str, src: &str, cli: &args::CliArgs) -> i32 {
+    let trace = cli.trace;
+    let mir_steps = cli.mir_steps;
     let tokens = rtoy_lexer::tokenize(src);
     if trace {
         println!("== lex ({} tokens) ==", tokens.len());
@@ -80,21 +79,27 @@ fn run_pipeline(src_path: &str, src: &str, trace: bool, ast_only: bool, mir_only
     if trace {
         trace_crate("final", &krate, src);
     }
-    if ast_only {
+    if cli.ast_only {
         println!("ast: {:#?}", krate);
         return EXIT_SUCCESS;
     }
-    if mir_only || mir_eval {
-        let mir = match rtoy_mir::lower_crate(&krate) {
+    if cli.hir_only || cli.thir_only {
+        return run_hir_thir(&krate, cli.hir_only);
+    }
+    if cli.mir_only || cli.mir_eval || mir_steps.is_some() {
+        let mir = match rtoy_ast_lowering::lower_crate(&krate) {
             Ok(mir) => mir,
             Err(e) => {
                 print_error_chain("mir lowering failed", &e);
                 return EXIT_FAILURE;
             }
         };
-        if mir_only {
+        if cli.mir_only {
             print!("{}", mir.dump());
             return EXIT_SUCCESS;
+        }
+        if let Some(budget) = mir_steps {
+            return run_mir_steps(&mir, budget);
         }
         return match rtoy_eval::eval_mir(&mir) {
             Ok(rt) => {
@@ -113,6 +118,66 @@ fn run_pipeline(src_path: &str, src: &str, trace: bool, ast_only: bool, mir_only
             print_error_chain("eval failed", &e);
             return EXIT_FAILURE;
         }
+    }
+    EXIT_SUCCESS
+}
+
+/// `--hir` / `--thir` — 해석·desugar된 트리 덤프 (rustc `-Zunpretty=hir`/`thir-tree` 흔내).
+fn run_hir_thir(krate: &rtoy_ast::Crate, hir_only: bool) -> i32 {
+    let hir = match rtoy_hir::lower(krate) {
+        Ok(hir) => hir,
+        Err(e) => {
+            print_error_chain("hir lowering failed", &e);
+            return EXIT_FAILURE;
+        }
+    };
+    if hir_only {
+        print!("{}", hir.dump());
+        return EXIT_SUCCESS;
+    }
+    match rtoy_thir::lower_crate(&hir) {
+        Ok(thir) => {
+            print!("{}", thir.dump());
+            EXIT_SUCCESS
+        }
+        Err(errs) => {
+            for e in &errs {
+                print_error_chain("thir lowering failed", e);
+            }
+            EXIT_FAILURE
+        }
+    }
+}
+
+/// `--mir-steps=N` 출력 — 실행 경로/현재 위치/값을 `==` 마커로 나눈다 (웹 서버가 파싱한다).
+fn run_mir_steps(mir: &rtoy_mir::MirCrate, budget: u64) -> i32 {
+    let run = match rtoy_eval::eval_mir_traced(mir, budget) {
+        Ok(run) => run,
+        Err(e) => {
+            print_error_chain("mir eval failed", &e);
+            return EXIT_FAILURE;
+        }
+    };
+    println!("== trace ==");
+    for ev in &run.trace {
+        let slot = ev.stmt.map(|i| format!(":{i}")).unwrap_or_default();
+        println!("#{} d{} {} bb{}{} {} | {}", ev.index, ev.depth, ev.fn_name, ev.bb, slot, ev.kind.as_str(), ev.text);
+    }
+    println!("== cursor ==");
+    match &run.cursor {
+        Some(c) => {
+            println!("fn={} bb={} depth={} steps={} budget={} halted={}", c.fn_name, c.bb, c.depth, run.steps, run.budget, run.halted as u8);
+            for (name, value) in &c.locals {
+                println!("{name} = {value}");
+            }
+        }
+        None => println!("fn=? bb=0 depth=0 steps={} budget={} halted={}", run.steps, run.budget, run.halted as u8),
+    }
+    println!("== value ==");
+    if run.halted {
+        println!("(실행 중: {}스텝)", run.steps);
+    } else {
+        println!("value: {}", run.runtime.format_value(&run.runtime.value));
     }
     EXIT_SUCCESS
 }
@@ -170,15 +235,18 @@ fn resolve_src_path(cli: &args::CliArgs, owned: &mut String) -> String {
 }
 
 fn print_help() {
-    println!("rtoy [--lex|--ast|--mir|--mir-eval] <file.rs> | --sample <name> — minimal rustc_driver toy");
+    println!("rtoy [--lex|--ast|--hir|--thir|--mir|--mir-eval|--mir-steps=N] <file.rs> | --sample <name> — minimal rustc_driver toy");
     println!("  --lex: lex 결과물만 출력하고 종료");
     println!("  --ast: AST만 출력하고 종료");
+    println!("  --hir: HIR(desugar+이름해석)만 출력하고 종료 (rustc -Zunpretty=hir 흥내)");
+    println!("  --thir: THIR(arena+타입검사)만 출력하고 종료 (rustc -Zunpretty=thir-tree 흥내)");
     println!("  --mir: MIR 덤프만 출력하고 종료 (rustc -Zunpretty=mir 흉내)");
     println!("  --mir-eval: MIR을 실행 (기본은 AST eval)");
+    println!("  --mir-steps=N: MIR을 N스텝만 실행하고 실행 경로·현재 위치·지역변수 출력");
     println!("  (기본) main을 eval 실행해 `value:` 출력");
     println!("  --sample <name>: toy/samples/<name>.rs 실행");
     println!("  --trace: lex→lowering(before)→expand(after) 단계별 출력");
-    println!("  passes (stub): lex -> parse -> ast_lower -> hir -> done");
+    println!("  passes: lex -> parse(ast) -> expand -> resolve -> hir -> thir -> mir");
     let names = sample_names();
     if names.is_empty() {
         println!("  samples: (없음 — toy/samples/*.rs)");
