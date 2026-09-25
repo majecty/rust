@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>rtoy → MIR 실시간 변환</title>
+<style>
+  :root {
+    --bg: #12141a; --panel: #1a1d26; --line: #2b303d; --fg: #dfe3ee;
+    --dim: #8b93a7; --accent: #7cc4ff; --err: #ff8a8a; --ok: #7ddf9a;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; height: 100vh; display: flex; flex-direction: column;
+         background: var(--bg); color: var(--fg);
+         font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  header { display: flex; align-items: center; gap: 12px; padding: 10px 14px;
+           border-bottom: 1px solid var(--line); background: var(--panel); flex-wrap: wrap; }
+  header h1 { margin: 0; font-size: 14px; font-weight: 600; letter-spacing: .02em; }
+  header h1 span { color: var(--accent); }
+  select, button { background: #232735; color: var(--fg); border: 1px solid var(--line);
+                   border-radius: 6px; padding: 4px 8px; font: inherit; cursor: pointer; }
+  #status { margin-left: auto; color: var(--dim); }
+  #status.err { color: var(--err); }
+  #status.ok { color: var(--ok); }
+  main { flex: 1; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr); min-height: 0; }
+  section { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+  section + section { border-left: 1px solid var(--line); }
+  .label { padding: 6px 12px; color: var(--dim); border-bottom: 1px solid var(--line);
+           font-size: 11px; text-transform: uppercase; letter-spacing: .08em; }
+  textarea, pre { margin: 0; padding: 12px; border: 0; flex: 1; overflow: auto;
+                  background: transparent; color: inherit; font: inherit; tab-size: 4; }
+  textarea { resize: none; outline: none; }
+  pre { white-space: pre; }
+  footer { border-top: 1px solid var(--line); background: var(--panel); }
+  #value { padding: 8px 12px; color: var(--fg); min-height: 34px; white-space: pre-wrap; }
+  #value.err { color: var(--err); }
+  .hint { padding: 0 12px 8px; color: var(--dim); font-size: 11px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>rtoy <span>→</span> MIR</h1>
+  <select id="samples" aria-label="샘플"></select>
+  <button id="run" title="Ctrl/Cmd + Enter">다시 실행</button>
+  <span id="status">대기 중…</span>
+</header>
+
+<main>
+  <section>
+    <div class="label">소스 (rtoy 문법)</div>
+    <textarea id="src" spellcheck="false"></textarea>
+  </section>
+  <section>
+    <div class="label">MIR (<code>--mir</code> 덤프)</div>
+    <pre id="mir"></pre>
+  </section>
+</main>
+
+<footer>
+  <div id="value">—</div>
+  <div class="hint">타이핑하면 자동 변환됩니다. <code>_0</code>=반환 자리, <code>bbN</code>=블록, 블록 끝의 점프가 terminator.</div>
+</footer>
+
+<script>
+const SAMPLES = {
+  "fib(재귀)": `fn fib() {
+    let n = 0;
+    if n < 2 { n } else { fib(n - 1) + fib(n - 2) }
+}
+
+fn main() {
+    let n = 10;
+    fib(n)
+}`,
+  "정수 하나": `fn main() { 42 }`,
+  "let + tail": `fn main() { let x = 1; x }`,
+  "if 분기": `fn main() { if 1 < 2 { 10 } else { 20 } }`,
+  "함수 호출": `fn main() { foo(1) }\nfn foo() { 2 }`,
+  "struct": `struct P { x: i64, y: i64 }\n\nfn main() {\n    let p = P { x: 7, y: 8 };\n    p.y\n}`,
+  "macro twice!": `macro_rules! twice { ($x:expr) => { $x + $x } }\n\nfn main() { twice!(3) }`,
+  "print": `fn main() {\n    print(1 + 2, 40);\n    7\n}`,
+};
+
+const srcEl = document.getElementById("src");
+const mirEl = document.getElementById("mir");
+const valueEl = document.getElementById("value");
+const statusEl = document.getElementById("status");
+const samplesEl = document.getElementById("samples");
+
+for (const name of Object.keys(SAMPLES)) {
+  const opt = document.createElement("option");
+  opt.value = name;
+  opt.textContent = name;
+  samplesEl.appendChild(opt);
+}
+
+let timer = 0;
+let inflight = 0;
+
+function setStatus(text, cls) {
+  statusEl.textContent = text;
+  statusEl.className = cls || "";
+}
+
+async function compileNow() {
+  const src = srcEl.value;
+  const ticket = ++inflight;
+  setStatus("변환 중…");
+  const t0 = performance.now();
+  try {
+    const res = await fetch("/api/compile", { method: "POST", body: src });
+    const data = await res.json();
+    if (ticket !== inflight) return; // 더 새 요청이 있으면 결과 버림
+    const ms = (performance.now() - t0).toFixed(0);
+    if (!data.ok) {
+      mirEl.textContent = data.error || "(에러)";
+      valueEl.textContent = "—";
+      valueEl.className = "err";
+      setStatus(`에러 · ${ms}ms`, "err");
+      return;
+    }
+    mirEl.textContent = data.mir;
+    valueEl.textContent = data.value || "—";
+    valueEl.className = "";
+    setStatus(`OK · ${ms}ms`, "ok");
+  } catch (e) {
+    if (ticket !== inflight) return;
+    mirEl.textContent = `요청 실패: ${e}\n서버가 떠 있는지 확인하세요 (node toy/web/serve.ts).`;
+    setStatus("요청 실패", "err");
+  }
+}
+
+function schedule() {
+  clearTimeout(timer);
+  timer = setTimeout(compileNow, 250);
+}
+
+srcEl.addEventListener("input", schedule);
+document.getElementById("run").addEventListener("click", compileNow);
+document.addEventListener("keydown", (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key === "Enter") { e.preventDefault(); compileNow(); }
+});
+samplesEl.addEventListener("change", () => {
+  srcEl.value = SAMPLES[samplesEl.value];
+  compileNow();
+});
+// Tab은 포커스 이동 대신 들여쓰기 (소스 편집 편의)
+srcEl.addEventListener("keydown", (e) => {
+  if (e.key !== "Tab") return;
+  e.preventDefault();
+  const s = srcEl.selectionStart, t = srcEl.selectionEnd;
+  srcEl.value = srcEl.value.slice(0, s) + "    " + srcEl.value.slice(t);
+  srcEl.selectionStart = srcEl.selectionEnd = s + 4;
+  schedule();
+});
+
+samplesEl.value = "fib(재귀)";
+srcEl.value = SAMPLES[samplesEl.value];
+compileNow();
+</script>
+</body>
+</html>
