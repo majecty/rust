@@ -54,7 +54,8 @@
   <select id="samples" aria-label="샘플"></select>
   <select id="stage" aria-label="단계">
     <option value="hir">HIR (desugar)</option>
-    <option value="thir">THIR (타입검사)</option>
+    <option value="thir">THIR (평탄 arena)</option>
+    <option value="thirTree">THIR (트리)</option>
     <option value="mir" selected>MIR (CFG)</option>
   </select>
   <select id="mode" aria-label="실행 방식">
@@ -85,7 +86,7 @@
 <footer>
   <div id="value">—</div>
   <div id="locals"></div>
-  <div class="hint">단계 선택 = HIR/THIR/MIR 덤프(한 번 받아 두고 전환은 재컴파일 없이 렌더만). 한 줄씩: 매 요청 처음부터 N스텝 재실행(리플레이)이라 큰 프로그램은 느립니다. <code>_0</code>=반환 자리, <code>bbN</code>=블록, 파란 줄=방금 실행한 MIR 줄.</div>
+  <div class="hint">단계 선택 = HIR/THIR(평탄·트리)/MIR 덤프(한 번 받아 두고 전환은 재컴파일 없이 렌더만). 한 줄씩: 매 요청 처음부터 N스텝 재실행(리플레이)이라 큰 프로그램은 느립니다. <code>_0</code>=반환 자리, <code>bbN</code>=블록, 파란 줄=방금 실행한 MIR 줄.</div>
 </footer>
 
 <script>
@@ -129,6 +130,14 @@ for (const name of Object.keys(SAMPLES)) {
   opt.textContent = name;
   samplesEl.appendChild(opt);
 }
+
+/** 단계 → 패널 라벨 (--플래그 이름과 일치시킨다). */
+const STAGE_LABEL = {
+  hir: "HIR (--hir 덤프)",
+  thir: "THIR (--thir 평탄 arena)",
+  thirTree: "THIR (--thir-tree 트리 전개)",
+  mir: "MIR (--mir 덤프)",
+};
 
 /** 화면 상태 — steps는 "몇 스텝까지 실행했는가" (리플레이 예산). */
 const state = { steps: 0, cursor: null, trace: [], lastError: false };
@@ -204,7 +213,7 @@ function render(data) {
   const stage = stageEl.value;
   const text = data[stage] ?? "";
   const hl = stage === "mir" && stepMode() ? cursorLine(text.split("\n")) : -1;
-  dumpLabelEl.textContent = `${stage.toUpperCase()} (--${stage} 덤프)`;
+  dumpLabelEl.textContent = STAGE_LABEL[stage] ?? stage;
   renderLines(dumpEl, text.split("\n"), hl);
   renderTrace();
 
@@ -248,7 +257,7 @@ async function compileNow() {
     state.lastError = false;
     state.cursor = data.cursor ?? null;
     state.trace = data.trace ?? [];
-    lastData = { hir: data.hir ?? "", thir: data.thir ?? "", mir: data.mir, value: data.value };
+    lastData = { hir: data.hir ?? "", thir: data.thir ?? "", thirTree: data.thirTree ?? "", mir: data.mir, value: data.value };
     render(lastData);
     const label = stepMode() && state.cursor?.halted === false ? "완료" : "OK";
     setStatus(`${label} · ${ms}ms`, "ok");

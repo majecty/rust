@@ -3,7 +3,7 @@
 > rustc를 축소한 학습용 컴파일러. 상세는 아래 문서로 분리됨.
 
 ## 1. 바로 실행
-- `cd toy && ./run [--lex|--ast|--hir|--thir|--trace] [file.rs]` (기본 입력 `toy/test.rs`)
+- `cd toy && ./run [--lex|--ast|--hir|--thir|--thir-tree|--trace] [file.rs]` (기본 입력 `toy/test.rs`)
 - `--lex`: 토큰만 출력 · `--ast`: AST만 · `--hir`: HIR(desugar+이름해석) · `--thir`: THIR(arena+타입검사) (기본은 main을 eval 실행)
 - `--trace`: lex→lowering(before)→expand(after)→final 한 줄 요약 출력
 - `./run --sample <이름>` (`ok/dup-fn/dup-fn-macro/twice/struct`, `-h`에 목록)
@@ -30,15 +30,15 @@
 - lowering: `fn name() { stmt* tail? }` + `if cond { } else { }` + `<` 비교 + 아이템 매크로 `def_fn!(foo)` + `struct`/리터럴/`p.x` 파서 + `if` 조건 no-struct-literal 제한 + 테스트 9개
 - resolve: 중복 fn 검사(미전개 Macro 제외) + **미정의 변수 에러**(`ResolveKind::UndefinedVar`, driver E0425) + **필드 참조 ident→slot**(`FieldAccess/FieldInit.slot`) + **지역변수 slot 배정 + `FnItem.locals`**(shadowing은 같은 slot 재사용) + **`Call.fn_index` 함수 테이블 번호**(eval 이름 해시 제거) + 테스트 10개
 - hir: `toy/hir` — HIR 데이터 + AST → HIR lowering: macro 제거(미전개면 `HirLowerError::MacroNotExpanded`) · 전 노드 `HirId{owner,local}` · expr stmt → `StmtKind::Semi` · **fn 최상위 `let` → `Body::params`**(초기화식=기본값) · 참조를 `FnId`/`StructId`/`LocalId`로 해석 · 필드는 이름만(순번은 THIR) · `dump()`(desugar된 소스) + 테스트 5개
-- thir: `toy/thir` — THIR 데이터(arena `exprs`/`blocks`/`stmts`/`params`) + HIR → THIR lowering + **toy 첫 typeck**(`Ty::{I64,Unit,Struct,Infer}`, 반환타입 fixpoint, `ThirLowerError` 4종) + `dump()`(arena+타입) + 테스트 9개
+- thir: `toy/thir` — THIR 데이터(arena `exprs`/`blocks`/`stmts`/`params`) + HIR → THIR lowering + **toy 첫 typeck**(`Ty::{I64,Unit,Struct,Infer}`, 반환타입 fixpoint, `ThirLowerError` 4종) + `dump()`(평탄 arena)/`dump_tree()`(트리 전개) + 테스트 10개
 - mir: `toy/mir` — MIR 데이터(rustc `rustc_middle/mir` 부분집합): `Body{locals, arg_locals, entry, blocks}` + `BasicBlock{stmts, terminator}` + `Place{local, proj}`/`Rvalue`/`Operand` + `TerminatorKind{Goto/SwitchInt/Call/Return}` + `dump()`/`stmt_str`/`term_str` + 테스트 1개
 - ast-lowering: `toy/ast-lowering` — AST(resolve 후) → MIR lowering(struct/fn 표, `if`→`SwitchInt`, 최상위 `let`→prologue 블록, `MirLowerError`) + 테스트 9개
 - mir-eval: `rtoy-eval::eval_mir` — MIR CFG를 선형 스캔(AST eval의 arena/`Frame`/`Value`/`Memory` 재사용) + `--mir-eval` + AST eval과 교차검증(samples/fib/print/에러샘플 동일). **최적화 패스가 없어 naive MIR은 AST eval보다 느림** (fib(25) MIR 29ms vs AST 13~16ms, §5 로그) — mir-opt가 다음 단계
 - mir-steps(웹 스테퍼): `eval_mir_traced(mir, budget)` — `budget` 스텝만 실행하고 실행 경로(`StepEvent`)·현재 위치(`Cursor`=fn/bb/지역변수)를 남긴다 (기존 `eval_mir`는 budget 없이 이 함수의 얇은 래퍼, 기록 오버헤드 0). driver `--mir-steps=N`이 `== trace ==/== cursor ==/== value ==` 마커로 출력
-- web: `toy/web/serve.ts` + `index.html` — 소스→HIR/THIR/MIR 단계 선택 뷰 + **한 줄씩 실행**. `POST /api/compile?steps=N`이 드라이버 `--mir-steps=N` 출력을 파싱해 trace/cursor/value를 JSON으로 반환, 페이지가 현재 MIR 줄을 하이라이트하고 실행 경로 클릭=그 스텝까지 재생. **매 요청 처음부터 재실행하는 리플레이 방식**이라 큰 프로그램엔 느림 (2단계=콜스택 명시화)
+- web: `toy/web/serve.ts` + `index.html` — 소스→HIR/THIR(평탄·트리)/MIR 단계 선택 뷰 + **한 줄씩 실행**. `POST /api/compile?steps=N`이 드라이버 `--mir-steps=N` 출력을 파싱해 trace/cursor/value를 JSON으로 반환, 페이지가 현재 MIR 줄을 하이라이트하고 실행 경로 클릭=그 스텝까지 재생. **매 요청 처음부터 재실행하는 리플레이 방식**이라 큰 프로그램엔 느림 (2단계=콜스택 명시화)
 - driver: lex → lowering → expand → resolve → {hir/thir 덤프 | eval} (기본 `value:` 출력) · `--ast`/`--hir`/`--thir`/`--mir`/`--mir-eval`/`--mir-steps=N` — MIR lowering은 `rtoy-ast-lowering`
 - bench: `toy/bench/fib-bench.ts` — python/node/perl/lua/luajit/c/rust/rtoy/rtoy-mir fib 비교(미설치·빌드 실패는 SKIP, 컴파일 시간 제외, rtoy도 release) · min/median/max + warmup 1회 + `--md`/`--json=<path>`. fib(25) rtoy 15ms ≈ CPython의 0.9배, rtoy-mir 29ms (§5 성능 로그)
-- 테스트 총 78개 통과 (span 5/lexer 1/ast 1/lowering 9/resolve 10/expand 11/hir 5/thir 9/mir 1/ast-lowering 9/eval 19) · struct + slot 변형 + `if`/재귀(fib 실행 가능) + 프레임 섀도잉/재호출
+- 테스트 총 79개 통과 (span 5/lexer 1/ast 1/lowering 9/resolve 10/expand 11/hir 5/thir 10/mir 1/ast-lowering 9/eval 19) · struct + slot 변형 + `if`/재귀(fib 실행 가능) + 프레임 섀도잉/재호출
 - Span: lexer→span→ast→lowering 배선 완료
   - `Token.span`, `Item.span`, `Block.span`, `Expr.span` 필드 유지
   - lowering: Item/Block/Expr span 생성 및 연결
@@ -99,6 +99,8 @@
 - [ ] MIR: AST 대신 THIR에서 내리기 (rustc 경로: HIR → THIR → MIR)
 - [ ] THIR: `Infer`가 남은 식 진단(E0282류) · 불리언 타입 도입해 `if` 조건을 bool로
 - [ ] HIR/THIR: `--trace` 단계 요약에 hir/thir 한 줄 추가
+- [ ] HIR: 평탄 덤프(`--hir-flat`, HirId로 노드를 나열해 arena처럼 보기)
+- [ ] 덤프: HIR↔THIR id 연결 표시(THIR `eN`에서 대응 HirId 보여주기)
 - [ ] Eval: 구조체 중첩 필드 (layout 안에 하위 layout offset)
 - [x] Bench: `toy/bench/fib-bench.ts` — 재귀 fib로 python/node/perl/lua/luajit/c/rust/rtoy 비교 (ruby/php/go는 미설치면 SKIP)
 - [x] Bench: 통계 보강 — min/median/max + warmup 1회 + 검증값 첫 run 고정 + `--md`/`--json=<path>` (rtoy도 runs 3으로 통일)

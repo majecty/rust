@@ -581,6 +581,141 @@ impl ThirCrate {
             Ty::Infer => "_".to_string(),
         }
     }
+
+    /// `rustc -Zunpretty=thir-tree` 흉내 — `body`에서 재귀 전개한 트리 덤프.
+    /// 평탄 덤프(`dump`)와 같은 데이터지만, 참조는 복제되어 나타난다(arena의 공유는 버린다).
+    pub fn dump_tree(&self) -> String {
+        let mut out = String::from("// thir-tree — `body`에서 재귀 전개 (참조는 복제, `#n`=slot)\n");
+        for f in &self.fns {
+            out.push_str(&self.fn_tree(f));
+        }
+        out
+    }
+
+    fn fn_tree(&self, f: &Thir) -> String {
+        let mut out = format!("fn {} -> {} {{ // fn_id={}\n", f.name, self.ty_str(&f.body.ty), f.fn_id);
+        if f.params.is_empty() {
+            out.push_str("    params: (없음)\n");
+        } else {
+            out.push_str("    params:\n");
+            for p in &f.params {
+                let default = p.default.map(|e| format!(" = e{e}")).unwrap_or_default();
+                out.push_str(&format!("        #{} {}: {}{default}\n", p.local, p.name, self.ty_str(&p.ty)));
+            }
+        }
+        out.push_str("    body:\n");
+        self.tree_expr(f, f.body.value, 2, &mut out);
+        out.push_str("}\n");
+        out
+    }
+
+    /// `eN: <ty> <head>` 한 줄 + kind별 자식 블록.
+    fn tree_expr(&self, f: &Thir, id: ExprId, depth: usize, out: &mut String) {
+        let e = &f.exprs[id as usize];
+        let pad = "    ".repeat(depth);
+        out.push_str(&format!("{pad}e{id}: {} {}\n", self.ty_str(&e.ty), self.tree_head(e)));
+        match &e.kind {
+            ExprKind::Block { block } => {
+                let b = &f.blocks[*block as usize];
+                if b.stmts.is_empty() {
+                    out.push_str(&format!("{pad}    stmts: (없음)\n"));
+                } else {
+                    out.push_str(&format!("{pad}    stmts:\n"));
+                    for s in &b.stmts {
+                        self.tree_stmt(f, *s, depth + 2, out);
+                    }
+                }
+                match b.expr {
+                    Some(v) => {
+                        out.push_str(&format!("{pad}    expr:\n"));
+                        self.tree_expr(f, v, depth + 2, out);
+                    }
+                    None => out.push_str(&format!("{pad}    expr: (없음)\n")),
+                }
+            }
+            ExprKind::If { cond, then_block, else_opt } => {
+                out.push_str(&format!("{pad}    cond:\n"));
+                self.tree_expr(f, *cond, depth + 2, out);
+                out.push_str(&format!("{pad}    then:\n"));
+                self.tree_expr(f, *then_block, depth + 2, out);
+                match else_opt {
+                    Some(e) => {
+                        out.push_str(&format!("{pad}    else:\n"));
+                        self.tree_expr(f, *e, depth + 2, out);
+                    }
+                    None => out.push_str(&format!("{pad}    else: (없음)\n")),
+                }
+            }
+            ExprKind::Binary { lhs, rhs, .. } => {
+                out.push_str(&format!("{pad}    lhs:\n"));
+                self.tree_expr(f, *lhs, depth + 2, out);
+                out.push_str(&format!("{pad}    rhs:\n"));
+                self.tree_expr(f, *rhs, depth + 2, out);
+            }
+            ExprKind::Call { args, .. } => self.tree_children(f, "args", args, depth, out),
+            ExprKind::Field { lhs, .. } => {
+                out.push_str(&format!("{pad}    base:\n"));
+                self.tree_expr(f, *lhs, depth + 2, out);
+            }
+            ExprKind::Adt { fields, .. } => {
+                if fields.is_empty() {
+                    out.push_str(&format!("{pad}    fields: (없음)\n"));
+                } else {
+                    for (index, value) in fields {
+                        out.push_str(&format!("{pad}    field f{index}:\n"));
+                        self.tree_expr(f, *value, depth + 2, out);
+                    }
+                }
+            }
+            ExprKind::Literal(_) | ExprKind::VarRef { .. } => {}
+        }
+    }
+
+    fn tree_children(&self, f: &Thir, label: &str, ids: &[ExprId], depth: usize, out: &mut String) {
+        let pad = "    ".repeat(depth);
+        if ids.is_empty() {
+            out.push_str(&format!("{pad}    {label}: (없음)\n"));
+            return;
+        }
+        out.push_str(&format!("{pad}    {label}:\n"));
+        for id in ids {
+            self.tree_expr(f, *id, depth + 2, out);
+        }
+    }
+
+    fn tree_stmt(&self, f: &Thir, id: StmtId, depth: usize, out: &mut String) {
+        let pad = "    ".repeat(depth);
+        match &f.stmts[id as usize].kind {
+            StmtKind::Expr { expr } => {
+                out.push_str(&format!("{pad}s{id}: Expr\n"));
+                self.tree_expr(f, *expr, depth + 1, out);
+            }
+            StmtKind::Let { local, name, ty, initializer } => {
+                out.push_str(&format!("{pad}s{id}: Let #{} {}: {}\n", local, name, self.ty_str(ty)));
+                match initializer {
+                    Some(e) => self.tree_expr(f, *e, depth + 1, out),
+                    None => out.push_str(&format!("{pad}    init: (없음)\n")),
+                }
+            }
+        }
+    }
+
+    /// 트리 한 줄의 머리말 — 자식 id는 아래 블록에 따로 나온다.
+    fn tree_head(&self, e: &Expr) -> String {
+        match &e.kind {
+            ExprKind::Literal(n) => format!("Literal({n})"),
+            ExprKind::VarRef { local, name } => format!("VarRef(#{local} {name})"),
+            ExprKind::Binary { op, .. } => format!("Binary({})", binop_str(*op)),
+            ExprKind::Call { name, .. } => format!("Call({name})"),
+            ExprKind::If { .. } => "If".to_string(),
+            ExprKind::Block { .. } => "Block".to_string(),
+            ExprKind::Field { name, index, struct_id, .. } => match (struct_id, index) {
+                (Some(id), Some(i)) => format!("Field(.{name} 순번={i} struct={})", self.struct_name(*id)),
+                _ => format!("Field(.{name})"),
+            },
+            ExprKind::Adt { struct_id, .. } => format!("Adt({})", self.struct_name(*struct_id)),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -690,5 +825,21 @@ mod tests {
         assert!(dump.contains("b0: stmts=[]"), "{dump}");
         // 정수 리터럴 span은 파서가 채운다 (Span 배선 확인).
         let f = fn0(&thir);
-        assert_ne!(f.exprs[0].span, Span::root(0, 0));    }
+        assert_ne!(f.exprs[0].span, Span::root(0, 0));
+    }
+
+    #[test]
+    fn tree_dump_expands_from_body() {
+        let src = "fn helper() { 3 } fn main() { let n = 1; helper(); if n < 2 { n } else { n + helper() } }";
+        let thir = thir_of(src).expect("thir");
+        let dump = thir.dump_tree();
+        // body(value)에서 닿는 expr만 나온다 — 이 프로그램은 전부 닿는다(프라미터 기본값 포함).
+        let main = &thir.fns[thir.fn_by_name["main"] as usize];
+        for i in 0..main.exprs.len() {
+            assert!(dump.contains(&format!("e{i}:")), "e{i}이 트리에 없다:\n{dump}");
+        }
+        assert!(dump.contains("s0: Expr"), "{dump}");
+        assert!(dump.contains("then:"), "{dump}");
+        assert!(dump.contains("params:\n        #0 n: i64 = e0"), "{dump}");
+    }
 }

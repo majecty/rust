@@ -83,8 +83,8 @@ fn run_pipeline(src_path: &str, src: &str, cli: &args::CliArgs) -> i32 {
         println!("ast: {:#?}", krate);
         return EXIT_SUCCESS;
     }
-    if cli.hir_only || cli.thir_only {
-        return run_hir_thir(&krate, cli.hir_only);
+    if cli.hir_only || cli.thir_only || cli.thir_tree {
+        return run_hir_thir(&krate, cli);
     }
     if cli.mir_only || cli.mir_eval || mir_steps.is_some() {
         let mir = match rtoy_ast_lowering::lower_crate(&krate) {
@@ -122,8 +122,8 @@ fn run_pipeline(src_path: &str, src: &str, cli: &args::CliArgs) -> i32 {
     EXIT_SUCCESS
 }
 
-/// `--hir` / `--thir` — 해석·desugar된 트리 덤프 (rustc `-Zunpretty=hir`/`thir-tree` 흔내).
-fn run_hir_thir(krate: &rtoy_ast::Crate, hir_only: bool) -> i32 {
+/// `--hir`/`--thir`/`--thir-tree` — 해석·desugar된 트리 덤프 (rustc `-Zunpretty=hir`/`thir-flat`/`thir-tree` 흔내).
+fn run_hir_thir(krate: &rtoy_ast::Crate, cli: &args::CliArgs) -> i32 {
     let hir = match rtoy_hir::lower(krate) {
         Ok(hir) => hir,
         Err(e) => {
@@ -131,13 +131,13 @@ fn run_hir_thir(krate: &rtoy_ast::Crate, hir_only: bool) -> i32 {
             return EXIT_FAILURE;
         }
     };
-    if hir_only {
+    if cli.hir_only {
         print!("{}", hir.dump());
         return EXIT_SUCCESS;
     }
     match rtoy_thir::lower_crate(&hir) {
         Ok(thir) => {
-            print!("{}", thir.dump());
+            print!("{}", if cli.thir_tree { thir.dump_tree() } else { thir.dump() });
             EXIT_SUCCESS
         }
         Err(errs) => {
@@ -235,11 +235,12 @@ fn resolve_src_path(cli: &args::CliArgs, owned: &mut String) -> String {
 }
 
 fn print_help() {
-    println!("rtoy [--lex|--ast|--hir|--thir|--mir|--mir-eval|--mir-steps=N] <file.rs> | --sample <name> — minimal rustc_driver toy");
+    println!("rtoy [--lex|--ast|--hir|--thir|--thir-tree|--mir|--mir-eval|--mir-steps=N] <file.rs> | --sample <name> — minimal rustc_driver toy");
     println!("  --lex: lex 결과물만 출력하고 종료");
     println!("  --ast: AST만 출력하고 종료");
     println!("  --hir: HIR(desugar+이름해석)만 출력하고 종료 (rustc -Zunpretty=hir 흥내)");
-    println!("  --thir: THIR(arena+타입검사)만 출력하고 종료 (rustc -Zunpretty=thir-tree 흥내)");
+    println!("  --thir: THIR 평탄 arena 덤프 (rustc -Zunpretty=thir-flat 흥내)");
+    println!("  --thir-tree: THIR을 body에서 재귀 전개한 트리로 출력 (rustc -Zunpretty=thir-tree 흥내)");
     println!("  --mir: MIR 덤프만 출력하고 종료 (rustc -Zunpretty=mir 흉내)");
     println!("  --mir-eval: MIR을 실행 (기본은 AST eval)");
     println!("  --mir-steps=N: MIR을 N스텝만 실행하고 실행 경로·현재 위치·지역변수 출력");

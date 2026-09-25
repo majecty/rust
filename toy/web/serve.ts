@@ -5,10 +5,10 @@
 // 예: node toy/web/serve.ts 8787   |   ts_run toy/web/serve.ts 8787
 //
 // - GET  /                     → index.html
-// - POST /api/compile          → 본문(소스)을 끝까지 실행해 { ok, hir, thir, mir, value, error } 반환
-// - POST /api/compile?steps=N  → N스텝까지만 실행해 { ok, hir, thir, mir, trace, cursor, value, error } 반환
+// - POST /api/compile          → 본문(소스)을 끝까지 실행해 { ok, hir, thir, thirTree, mir, value, error } 반환
+// - POST /api/compile?steps=N  → N스텝까지만 실행해 { ok, hir, thir, thirTree, mir, trace, cursor, value, error } 반환
 //   (스텝 실행은 드라이버 `--mir-steps=N` 출력을 파싱한 것 — 매 요청 처음부터 재실행하는 리플레이 방식)
-// - hir/thir/mir는 드라이버를 각각 `--hir`/`--thir`/`--mir`로 실행해 받은 덤프다(요청당 프로세스 3~4개).
+// - hir/thir/thirTree/mir는 드라이버를 각각 `--hir`/`--thir`/`--thir-tree`/`--mir`로 실행해 받은 덤프다(요청당 프로세스 4~5개).
 // - 드라이버는 워크스페이스 공용 target/debug/rtoy-driver 를 쓴다 (없으면 빌드 안내를 반환).
 import { createServer } from "node:http";
 import { spawnSync } from "node:child_process";
@@ -96,30 +96,31 @@ function dump(flag: string, file: string): string {
 /** 소스를 임시 파일로 써서 드라이버를 실행한다 (`--mir` 덤프 + 실행). */
 function compile(source: string, steps?: number) {
   if (!existsSync(DRIVER)) {
-    return { ok: false, hir: "", thir: "", mir: "", value: "", error: `드라이버가 없습니다: ${DRIVER}\n빌드: cargo build -p rtoy-driver` };
+    return { ok: false, hir: "", thir: "", thirTree: "", mir: "", value: "", error: `드라이버가 없습니다: ${DRIVER}\n빌드: cargo build -p rtoy-driver` };
   }
   const file = join(WORK, `in-${seq++}.rs`);
   writeFileSync(file, source);
 
   const mir = spawnSync(DRIVER, ["--mir", file], { encoding: "utf8", timeout: 10_000 });
   if (mir.status !== 0) {
-    return { ok: false, hir: "", thir: "", mir: "", value: "", error: `${mir.stdout ?? ""}${mir.stderr ?? ""}`.trim() };
+    return { ok: false, hir: "", thir: "", thirTree: "", mir: "", value: "", error: `${mir.stdout ?? ""}${mir.stderr ?? ""}`.trim() };
   }
   const hir = dump("--hir", file);
   const thir = dump("--thir", file);
+  const thirTree = dump("--thir-tree", file);
   const mirText = (mir.stdout ?? "").trim();
   if (steps !== undefined) {
     const run = spawnSync(DRIVER, [`--mir-steps=${steps}`, file], { encoding: "utf8", timeout: 10_000 });
     const out = `${run.stdout ?? ""}${run.stderr ?? ""}`;
     if (run.status !== 0) {
-      return { ok: false, hir, thir, mir: mirText, value: "", error: out.trim() };
+      return { ok: false, hir, thir, thirTree, mir: mirText, value: "", error: out.trim() };
     }
     const parsed = parseSteps(out);
-    return { ok: true, hir, thir, mir: mirText, ...parsed, error: "" };
+    return { ok: true, hir, thir, thirTree, mir: mirText, ...parsed, error: "" };
   }
   const ev = spawnSync(DRIVER, [file], { encoding: "utf8", timeout: 10_000 });
   const value = `${ev.stdout ?? ""}${ev.stderr ?? ""}`.trim();
-  return { ok: true, hir, thir, mir: mirText, value, error: "" };
+  return { ok: true, hir, thir, thirTree, mir: mirText, value, error: "" };
 }
 
 function sendJson(res: import("node:http").ServerResponse, body: unknown): void {
@@ -146,7 +147,7 @@ function main(): void {
       const raw = url.searchParams.get("steps");
       const steps = raw === null ? undefined : Math.max(0, Math.floor(Number(raw)));
       if (steps !== undefined && !Number.isFinite(steps)) {
-        sendJson(res, { ok: false, hir: "", thir: "", mir: "", value: "", error: `steps 값이 올바르지 않습니다: ${raw}` });
+        sendJson(res, { ok: false, hir: "", thir: "", thirTree: "", mir: "", value: "", error: `steps 값이 올바르지 않습니다: ${raw}` });
         return;
       }
       const chunks: Buffer[] = [];

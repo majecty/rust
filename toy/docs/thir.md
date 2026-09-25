@@ -3,7 +3,7 @@
 ## 1. 완료 범위
 - crate: `toy/thir` (`rtoy-thir`) — THIR 데이터 + `lower_crate(&HirCrate) -> Result<ThirCrate, Vec<ThirLowerError>>`
 - 대응 rustc: `compiler/rustc_middle/src/thir.rs` (데이터) + `compiler/rustc_hir_analysis/src/thir/` (lowering/typeck)
-- 실행: `./run --thir [--sample struct]`
+- 실행: `./run --thir [--sample struct]` (평탄 arena) / `./run --thir-tree` (트리 전개)
 - **toy에서 타입검사가 처음 들어오는 단계다.** rustc는 typeck 결과를 THIR에 채우지만, 여기서는 lowering이 직접 추론한다(최소형).
 
 ## 2. HIR과 다른 점
@@ -33,7 +33,11 @@
   rustc는 typeck를 먼저 돌려 이 문제를 없앤다 (toy는 이 자리를 fixpoint로 대신한다).
 - `Ty::Infer`는 오류가 아니라 "모름"이다. 남아 있으면 덤프에 `_`로 보이고 검사를 건너뛴다.
 
-## 4. 덤프 (`--thir`, `samples/struct.rs`)
+## 4. 덤프 — 평탄(arena) vs 트리
+두 덤프는 **같은 데이터**다. `dump()`는 arena를 그대로 나열(자식은 `eN` 참조), `dump_tree()`는 `body`에서 재귀 전개한다.
+rustc 대응: `-Zunpretty=thir-flat`(arena `{:#?}`) ↔ `--thir`, `-Zunpretty=thir-tree`(ThirPrinter) ↔ `--thir-tree`.
+
+`--thir` (평탄 — `samples/struct.rs`):
 ```
 fn main -> i64 { // fn_id=0
     params: #0 p: Point = e2
@@ -48,9 +52,44 @@ fn main -> i64 { // fn_id=0
     e8: i64 = Block(b0)
 }
 ```
+
+`--thir-tree` (트리 전개 — `fn helper() { 3 } fn main() { let n = 1; helper(); if n < 2 { n } else { n + helper() } }`):
+```
+fn main -> i64 { // fn_id=1
+    params:
+        #0 n: i64 = e0
+    body:
+        e12: i64 Block
+            stmts:
+                s0: Expr
+                    e1: i64 Call(helper)
+                        args: (없음)
+            expr:
+                e11: i64 If
+                    cond:
+                        e4: i64 Binary(<)
+                            lhs:
+                                e2: i64 VarRef(#0 n)
+                            rhs:
+                                e3: i64 Literal(2)
+                    then:
+                        e6: i64 Block
+                            expr:
+                                e5: i64 VarRef(#0 n)
+                    else:
+                        e10: i64 Block
+                            expr:
+                                e9: i64 Binary(+)
+                                    ...
+}
+```
 - 자식이 먼저 arena에 들어가고 부모 id가 뒤에 온다 (rustc THIR과 같은 순서).
-- 타입 오류 예 (`fn main() { let x = 1; x.y }`):
-  `error: thir lowering failed: expected struct in field access, found `i64` at [23..26]`
+- 트리 덤프는 **참조를 복제**한다(`n` 참조가 `e2`/`e5`/`e7`) — arena의 공유 정보는 버리고 읽기 쉬운 모양을 택한 것.
+- 그래서 `dump_tree`는 `body.value`에서 닿지 않는 expr을 보여주지 않는다(테스트 `tree_dump_expands_from_body`가 `body`에서 모든 expr id를 방문하는지 확인).
+- `params` 기본값(`= e0`)은 arena 항목으로도 잡혀 있다(평탄 덤프에 `e0`로 등장).
+
+타입 오류 예 (`fn main() { let x = 1; x.y }`):
+`error: thir lowering failed: expected struct in field access, found `i64` at [23..26]`
 
 ## 5. 미구현
 - 불리언/참조/제네릭/트레이트/메서드 호출 없음 (`if` 조건은 `i64`, `print` 인자도 `i64`).

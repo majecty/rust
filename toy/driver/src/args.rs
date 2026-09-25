@@ -7,6 +7,7 @@ pub fn parse(args: &[String]) -> Result<Option<CliArgs>, String> {
     let mut ast_only = false;
     let mut hir_only = false;
     let mut thir_only = false;
+    let mut thir_tree = false;
     let mut mir_only = false;
     let mut mir_eval = false;
     let mut mir_steps: Option<u64> = None;
@@ -24,6 +25,8 @@ pub fn parse(args: &[String]) -> Result<Option<CliArgs>, String> {
             hir_only = true;
         } else if arg == "--thir" {
             thir_only = true;
+        } else if arg == "--thir-tree" {
+            thir_tree = true;
         } else if arg == "--mir" {
             mir_only = true;
         } else if arg == "--mir-eval" {
@@ -50,11 +53,11 @@ pub fn parse(args: &[String]) -> Result<Option<CliArgs>, String> {
         }
         i += 1;
     }
-    let dumps = [lex_only, ast_only, hir_only, thir_only, mir_only, mir_eval];
+    let dumps = [lex_only, ast_only, hir_only, thir_only, thir_tree, mir_only, mir_eval];
     if dumps.iter().filter(|x| **x).count() > 1
-        || (mir_steps.is_some() && (lex_only || ast_only || hir_only || thir_only || mir_only))
+        || (mir_steps.is_some() && (lex_only || ast_only || hir_only || thir_only || thir_tree || mir_only))
     {
-        return Err("--lex/--ast/--hir/--thir/--mir/--mir-eval/--mir-steps는 함께 쓸 수 없음".to_string());
+        return Err("--lex/--ast/--hir/--thir/--thir-tree/--mir/--mir-eval/--mir-steps는 함께 쓸 수 없음".to_string());
     }
     if sample.is_some() && path.is_some() {
         return Err("--sample과 파일 인자는 함께 쓸 수 없음".to_string());
@@ -67,6 +70,7 @@ pub fn parse(args: &[String]) -> Result<Option<CliArgs>, String> {
         ast_only,
         hir_only,
         thir_only,
+        thir_tree,
         mir_only,
         mir_eval,
         mir_steps,
@@ -80,9 +84,11 @@ pub fn parse(args: &[String]) -> Result<Option<CliArgs>, String> {
 pub struct CliArgs {
     pub lex_only: bool,
     pub ast_only: bool,
-    /// `--hir`/`--thir`: 해석·desugar된 트리(rustc -Zunpretty=hir/thir 쪽).
+    /// `--hir`/`--thir`/`--thir-tree`: 해석·desugar된 트리(rustc -Zunpretty=hir/thir 쪽).
     pub hir_only: bool,
     pub thir_only: bool,
+    /// `--thir-tree`: THIR을 평탄 arena 대신 트리로 전개해 출력 (rustc thir-tree).
+    pub thir_tree: bool,
     pub mir_only: bool,
     pub mir_eval: bool,
     /// `--mir-steps=N`: MIR을 N스텝만 실행하고 실행 경로·현재 위치를 출력 (웹 한 줄 실행용).
